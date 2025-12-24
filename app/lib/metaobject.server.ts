@@ -7,13 +7,17 @@ const METAOBJECT_NAME = "MM Pro de santé";
  * Vérifie si le métaobjet existe
  */
 export async function checkMetaobjectExists(admin: AdminApiContext): Promise<boolean> {
-  // Utiliser la méthode simple avec metaobjectDefinition
+  // Utiliser une requête qui liste tous les métaobjets pour être sûr
   const query = `
     query {
-      metaobjectDefinition(type: "${METAOBJECT_TYPE}") {
-        id
-        name
-        type
+      metaobjectDefinitions(first: 250) {
+        edges {
+          node {
+            id
+            name
+            type
+          }
+        }
       }
     }
   `;
@@ -22,14 +26,30 @@ export async function checkMetaobjectExists(admin: AdminApiContext): Promise<boo
     const response = await admin.graphql(query);
     const data = await response.json() as {
       data?: {
-        metaobjectDefinition?: {
-          id: string;
-          name: string;
-          type: string;
+        metaobjectDefinitions?: {
+          edges?: Array<{
+            node?: {
+              id: string;
+              name: string;
+              type: string;
+            };
+          }>;
         };
       };
+      errors?: Array<{ message: string }>;
     };
-    return !!data.data?.metaobjectDefinition;
+    
+    if (data.errors) {
+      console.error("Erreurs GraphQL:", data.errors);
+      return false;
+    }
+    
+    const definitions = data.data?.metaobjectDefinitions?.edges || [];
+    const exists = definitions.some(
+      edge => edge.node?.type === METAOBJECT_TYPE || edge.node?.name === METAOBJECT_NAME
+    );
+    
+    return exists;
   } catch (error) {
     console.error("Erreur lors de la vérification du métaobjet:", error);
     return false;
@@ -40,6 +60,12 @@ export async function checkMetaobjectExists(admin: AdminApiContext): Promise<boo
  * Crée le métaobjet avec tous ses champs
  */
 export async function createMetaobject(admin: AdminApiContext): Promise<{ success: boolean; error?: string }> {
+  // Vérifier d'abord si le métaobjet existe déjà
+  const exists = await checkMetaobjectExists(admin);
+  if (exists) {
+    return { success: true }; // Déjà créé, pas besoin de le recréer
+  }
+  
   // Création des définitions de champs une par une
   const fieldDefinitions = [
     {
@@ -99,13 +125,14 @@ export async function createMetaobject(admin: AdminApiContext): Promise<{ succes
     }
   `;
 
-  // Construction des fieldDefinitions au format GraphQL (sans validations pour éviter les erreurs)
+  // Construction des fieldDefinitions au format GraphQL avec validations
   const graphqlFieldDefinitions = fieldDefinitions.map(field => {
     const base: {
       name: string;
       key: string;
       required: boolean;
       type?: string;
+      validations?: Array<{ name: string; value: string[] }>;
     } = {
       name: field.name,
       key: field.key,
@@ -114,8 +141,16 @@ export async function createMetaobject(admin: AdminApiContext): Promise<{ succes
 
     if (field.type === "single_line_text_field") {
       base.type = "single_line_text_field";
-      // Les choix seront ajoutés manuellement dans l'interface Shopify pour l'instant
-      // Le format GraphQL pour les choix nécessite une structure spécifique
+      
+      // Ajouter les choix si définis - format correct pour Shopify
+      if (field.choices && field.choices.length > 0) {
+        base.validations = [
+          {
+            name: "choices",
+            value: field.choices
+          }
+        ];
+      }
     } else if (field.type === "number_decimal") {
       base.type = "number_decimal";
     }
