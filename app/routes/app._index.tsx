@@ -1,9 +1,9 @@
-import { useState, useCallback } from "react";
+import { useState } from "react";
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData, useSubmit, useNavigation, useActionData } from "@remix-run/react";
 import {
-  Page, Layout, Card, Tabs, Button, Text, BlockStack, ResourceList, ResourceItem, Badge, Banner
+  Page, Layout, Card, Tabs, Button, Text, BlockStack, ResourceList, ResourceItem, Badge, Banner, Box
 } from "@shopify/polaris";
 import { authenticate } from "../shopify.server";
 
@@ -20,10 +20,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }
   `);
   
-  const moData = await checkMO.json();
+  const moData = await (checkMO as any).json();
   const moExists = moData.data.metaobjectDefinitionByType !== null;
 
-  // 2. Récupérer les données existantes
+  // 2. Récupérer les données pour les 3 onglets
   const response = await admin.graphql(`
     #graphql
     query {
@@ -34,7 +34,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           fields { key value }
         }
       }
-      discountNodes(first: 10) {
+      discountNodes(first: 20) {
         nodes {
           id
           discount { ... on DiscountCodeBasic { title status } }
@@ -46,28 +46,27 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }
   `);
 
-  const data = await response.json();
+  const data = await (response as any).json();
 
   return json({
     moExists,
-    pros: data.data.metaobjects?.nodes || [],
-    discounts: data.data.discountNodes?.nodes || [],
-    customers: data.data.customers?.nodes || [],
+    pros: data.data?.metaobjects?.nodes || [],
+    discounts: data.data?.discountNodes?.nodes || [],
+    customers: data.data?.customers?.nodes || [],
   });
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
   const formData = await request.formData();
-  const intent = formData.get("intent");
-
-  if (intent === "create_structure") {
+  
+  if (formData.get("intent") === "create_structure") {
     const createRes = await admin.graphql(`
       #graphql
-      mutation CreateMetaobjectDefinition($definition: MetaobjectDefinitionCreateInput!) {
+      mutation CreateDef($definition: MetaobjectDefinitionCreateInput!) {
         metaobjectDefinitionCreate(definition: $definition) {
-          metaobjectDefinition { name type }
-          userErrors { field message }
+          metaobjectDefinition { type }
+          userErrors { message }
         }
       }
     `, {
@@ -92,21 +91,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         }
       }
     });
-
-    const result = await createRes.json();
-    return json({ result });
+    return json({ result: await (createRes as any).json() });
   }
   return null;
 };
 
 export default function Index() {
   const { moExists, pros, discounts, customers } = useLoaderData<typeof loader>();
-  const actionData = useActionData<typeof action>();
   const submit = useSubmit();
   const navigation = useNavigation();
   const [selectedTab, setSelectedTab] = useState(0);
-
-  const isLoading = navigation.state === "submitting";
 
   const tabs = [
     { id: 'pros', content: 'Pros (Metaobjects)' },
@@ -115,16 +109,16 @@ export default function Index() {
   ];
 
   return (
-    <Page title="Gestion Pros Jolly Mama">
+    <Page title="Gestion Pros de Santé">
       <Layout>
         <Layout.Section>
           {!moExists && (
-            <Banner title="Structure manquante" tone="warning" onDismiss={() => {}}>
+            <Banner title="Structure manquante" tone="warning">
               <BlockStack gap="200">
-                <Text as="p">Le Metaobject <b>mm_pro_de_sante</b> n'est pas détecté.</Text>
+                <Text as="p">Le Metaobject <b>mm_pro_de_sante</b> n'est pas encore créé.</Text>
                 <Button 
                   onClick={() => submit({ intent: "create_structure" }, { method: "post" })}
-                  loading={isLoading}
+                  loading={navigation.state === "submitting"}
                   variant="primary"
                 >
                   Créer la structure automatiquement
@@ -133,23 +127,54 @@ export default function Index() {
             </Banner>
           )}
 
-          <Tabs tabs={tabs} selected={selectedTab} onSelect={setSelectedTab}>
-            <Card padding="500">
-              {selectedTab === 0 && (
-                <ResourceList
-                  resourceName={{ singular: 'pro', plural: 'pros' }}
-                  items={pros}
-                  renderItem={(item: any) => (
-                    <ResourceItem id={item.id} onClick={() => {}}>
-                      <Text as="h3" variant="bodyMd" fontWeight="bold">{item.displayName}</Text>
-                      <Text as="p" tone="subdued">Code: {item.fields.find((f:any) => f.key === 'code')?.value}</Text>
-                    </ResourceItem>
-                  )}
-                />
-              )}
-              {/* Vues Codes Promo et Clients similaires... */}
-            </Card>
-          </Tabs>
+          <Card padding="0">
+            <Tabs tabs={tabs} selected={selectedTab} onSelect={setSelectedTab}>
+              <Box padding="400">
+                {selectedTab === 0 && (
+                  <ResourceList
+                    resourceName={{ singular: 'pro', plural: 'pros' }}
+                    items={pros}
+                    renderItem={(item: any) => (
+                      <ResourceItem id={item.id} onClick={() => {}}>
+                        <Text as="h3" variant="bodyMd" fontWeight="bold">{item.displayName}</Text>
+                        <Text as="p" tone="subdued">Code: {item.fields.find((f:any) => f.key === 'code')?.value || 'N/A'}</Text>
+                      </ResourceItem>
+                    )}
+                  />
+                )}
+
+                {selectedTab === 1 && (
+                  <ResourceList
+                    resourceName={{ singular: 'code', plural: 'codes' }}
+                    items={discounts}
+                    renderItem={(item: any) => (
+                      <ResourceItem id={item.id} onClick={() => {}}>
+                        <BlockStack gap="100">
+                          <Text as="h3" variant="bodyMd" fontWeight="bold">{item.discount?.title || "Sans titre"}</Text>
+                          <Badge tone={item.discount?.status === 'ACTIVE' ? 'success' : 'attention'}>
+                            {item.discount?.status || 'Inconnu'}
+                          </Badge>
+                        </BlockStack>
+                      </ResourceItem>
+                    )}
+                  />
+                )}
+
+                {selectedTab === 2 && (
+                  <ResourceList
+                    resourceName={{ singular: 'client', plural: 'clients' }}
+                    items={customers}
+                    renderItem={(item: any) => (
+                      <ResourceItem id={item.id} onClick={() => {}}>
+                        <Text as="h3" variant="bodyMd" fontWeight="bold">{item.displayName}</Text>
+                        <Text as="p" tone="subdued">{item.email}</Text>
+                      </ResourceItem>
+                    )}
+                  />
+                )}
+              </Box>
+            </Tabs>
+          </Card>
         </Layout.Section>
       </Layout>
     </Page>
