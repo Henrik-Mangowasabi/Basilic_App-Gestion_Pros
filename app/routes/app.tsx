@@ -5,6 +5,7 @@ import { AppProvider as ShopifyAppProvider } from "@shopify/shopify-app-react-ro
 import { AppProvider as PolarisAppProvider } from "@shopify/polaris";
 
 import { authenticate } from "../shopify.server";
+import { ErrorDisplay } from "../components/ErrorDisplay";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   await authenticate.admin(request);
@@ -31,7 +32,16 @@ export default function App() {
 
 // Shopify needs React Router to catch some thrown responses, so that their headers are included in the response.
 export function ErrorBoundary() {
-  return boundary.error(useRouteError());
+  const error = useRouteError();
+  const { apiKey } = useLoaderData<typeof loader>();
+  
+  return (
+    <ShopifyAppProvider embedded apiKey={apiKey}>
+      <PolarisAppProvider i18n={{}}>
+        <ErrorDisplay error={error} />
+      </PolarisAppProvider>
+    </ShopifyAppProvider>
+  );
 }
 
 export const headers: HeadersFunction = (headersArgs) => {

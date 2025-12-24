@@ -114,13 +114,8 @@ export async function createMetaobject(admin: AdminApiContext): Promise<{ succes
 
     if (field.type === "single_line_text_field") {
       base.type = "single_line_text_field";
-      // Ajouter les choix si présents (pour les listes de choix)
-      if (field.choices && field.choices.length > 0) {
-        base.validations = field.choices.map((choice: string) => ({
-          name: "choices",
-          value: choice
-        }));
-      }
+      // Les choix seront ajoutés manuellement dans l'interface Shopify pour l'instant
+      // Le format GraphQL pour les choix nécessite une structure spécifique
     } else if (field.type === "number_decimal") {
       base.type = "number_decimal";
     }
