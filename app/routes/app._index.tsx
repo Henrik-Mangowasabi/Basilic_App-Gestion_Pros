@@ -393,17 +393,24 @@ function NewEntryForm() {
 
   // Réinitialiser le formulaire après succès
   React.useEffect(() => {
-    const searchParams = new URLSearchParams(window.location.search);
-    if (searchParams.get("success") === "entry_created") {
-      setFormData({
-        identification: "",
-        name: "",
-        email: "",
-        code: "",
-        montant: "",
-        type: "",
-      });
-    }
+    const checkSuccess = () => {
+      const searchParams = new URLSearchParams(window.location.search);
+      if (searchParams.get("success") === "entry_created") {
+        setFormData({
+          identification: "",
+          name: "",
+          email: "",
+          code: "",
+          montant: "",
+          type: "",
+        });
+      }
+    };
+    
+    checkSuccess();
+    // Vérifier aussi après un court délai pour être sûr
+    const timer = setTimeout(checkSuccess, 100);
+    return () => clearTimeout(timer);
   }, []);
 
   return (
@@ -504,13 +511,13 @@ export default function Index() {
 
   React.useEffect(() => {
     if (successMessage) {
-      // Nettoyer l'URL après 3 secondes
+      // Nettoyer l'URL après 4 secondes
       const timer = setTimeout(() => {
         const url = new URL(window.location.href);
         url.searchParams.delete("success");
         window.history.replaceState({}, "", url.toString());
         setShowSuccess(false);
-      }, 3000);
+      }, 4000);
       return () => clearTimeout(timer);
     }
   }, [successMessage]);
@@ -524,6 +531,42 @@ export default function Index() {
       fontFamily: "Arial, sans-serif"
     }}>
       <h1 style={{ color: "#333", marginBottom: "2rem", textAlign: "center" }}>app page web</h1>
+      
+      {showSuccess && successMessage === "entry_created" && (
+        <div style={{
+          padding: "1rem 2rem",
+          marginBottom: "1rem",
+          backgroundColor: "#008060",
+          color: "white",
+          borderRadius: "6px",
+          maxWidth: "800px",
+          margin: "0 auto 1rem",
+          textAlign: "center",
+          fontWeight: "600",
+          fontSize: "1.1em",
+          boxShadow: "0 2px 4px rgba(0,0,0,0.1)"
+        }}>
+          ✓ Entrée créée avec succès !
+        </div>
+      )}
+
+      {showSuccess && successMessage === "entry_updated" && (
+        <div style={{
+          padding: "1rem 2rem",
+          marginBottom: "1rem",
+          backgroundColor: "#008060",
+          color: "white",
+          borderRadius: "6px",
+          maxWidth: "800px",
+          margin: "0 auto 1rem",
+          textAlign: "center",
+          fontWeight: "600",
+          fontSize: "1.1em",
+          boxShadow: "0 2px 4px rgba(0,0,0,0.1)"
+        }}>
+          ✓ Entrée modifiée avec succès !
+        </div>
+      )}
       
       {actionData?.error && (
         <div style={{
