@@ -168,8 +168,8 @@ function EntryRow({ entry, index }: {
   const [searchParams] = useSearchParams();
   
   // Fonction pour initialiser les données du formulaire
-  const getInitialFormData = React.useCallback(() => {
-    const data = {
+  const getInitialFormData = () => {
+    return {
       identification: entry.identification || "",
       name: entry.name || "",
       email: entry.email || "",
@@ -177,53 +177,68 @@ function EntryRow({ entry, index }: {
       montant: entry.montant !== undefined && entry.montant !== null ? String(entry.montant) : "",
       type: entry.type || "",
     };
-    // Debug: log les valeurs
-    console.log("Entry data:", entry);
-    console.log("Form data initialized:", data);
-    return data;
-  }, [entry]);
+  };
 
-  const [formData, setFormData] = React.useState(() => getInitialFormData());
+  const [formData, setFormData] = React.useState(getInitialFormData);
   const previousEntryId = React.useRef(entry.id);
-  const isUserEditing = React.useRef(false);
+  const isUserEditingRef = React.useRef(false);
 
   // Détecter si une mise à jour a réussi et réinitialiser le flag
   React.useEffect(() => {
     if (searchParams.get("success") === "entry_updated") {
-      isUserEditing.current = false;
+      isUserEditingRef.current = false;
       setIsEditing(false);
-      const newData = getInitialFormData();
-      setFormData(newData);
+      setFormData({
+        identification: entry.identification || "",
+        name: entry.name || "",
+        email: entry.email || "",
+        code: entry.code || "",
+        montant: entry.montant !== undefined && entry.montant !== null ? String(entry.montant) : "",
+        type: entry.type || "",
+      });
     }
-  }, [searchParams, getInitialFormData]);
+  }, [searchParams, entry]);
 
-  // Mettre à jour formData quand entry change et désactiver le mode édition après un redirect
+  // Mettre à jour formData SEULEMENT si l'ID change (nouvelle entrée ou après redirect)
+  // NE JAMAIS mettre à jour si l'utilisateur est en train d'éditer
   React.useEffect(() => {
-    // Seulement mettre à jour si l'ID de l'entrée a changé (nouvelle entrée ou après redirect)
+    // Ne rien faire si l'utilisateur est en train d'éditer
+    if (isUserEditingRef.current) {
+      return;
+    }
+    
     if (previousEntryId.current !== entry.id) {
       previousEntryId.current = entry.id;
-      const newData = getInitialFormData();
-      setFormData(newData);
+      // Créer les données directement ici pour éviter les dépendances
+      setFormData({
+        identification: entry.identification || "",
+        name: entry.name || "",
+        email: entry.email || "",
+        code: entry.code || "",
+        montant: entry.montant !== undefined && entry.montant !== null ? String(entry.montant) : "",
+        type: entry.type || "",
+      });
       setIsEditing(false);
-      isUserEditing.current = false;
-    } else if (!isUserEditing.current) {
-      // Si l'utilisateur n'est pas en train d'éditer, mettre à jour les données
-      const newData = getInitialFormData();
-      setFormData(newData);
+      isUserEditingRef.current = false;
     }
-  }, [entry.id, getInitialFormData]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entry.id]);
 
   const handleEdit = () => {
     console.log("Mode édition activé pour:", entry);
+    // IMPORTANT: Mettre le flag AVANT tout autre changement d'état
+    // pour éviter que le useEffect ne réinitialise formData
+    isUserEditingRef.current = true;
+    
     // Réinitialiser formData avec les valeurs actuelles avant d'activer l'édition
     const currentData = getInitialFormData();
+    console.log("Données du formulaire avant édition:", currentData);
     setFormData(currentData);
-    isUserEditing.current = true;
     setIsEditing(true);
   };
 
   const handleCancel = () => {
-    isUserEditing.current = false;
+    isUserEditingRef.current = false;
     setIsEditing(false);
     // Réinitialiser les valeurs avec les valeurs actuelles de l'entrée
     setFormData(getInitialFormData());
