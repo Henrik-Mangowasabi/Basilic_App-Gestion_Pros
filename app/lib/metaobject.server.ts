@@ -238,9 +238,10 @@ export async function createMetaobjectEntry(
     type: string;
   }
 ): Promise<{ success: boolean; error?: string }> {
-  // Validation des champs requis
+  // Validation des champs requis (identification est maintenant auto-générée si vide)
   if (!fields.identification || fields.identification.trim() === "") {
-    return { success: false, error: "Le champ Identification est requis" };
+    // Auto-générer si toujours vide (ne devrait pas arriver)
+    fields.identification = `ID_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
   }
   if (!fields.name || fields.name.trim() === "") {
     return { success: false, error: "Le champ Name est requis" };

@@ -50,12 +50,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   // Créer une nouvelle entrée
   if (actionType === "create_entry") {
-    const identification = (formData.get("identification") as string)?.trim() || "";
+    let identification = (formData.get("identification") as string)?.trim() || "";
     const name = (formData.get("name") as string)?.trim() || "";
     const email = (formData.get("email") as string)?.trim() || "";
     const code = (formData.get("code") as string)?.trim() || "";
     const montantStr = (formData.get("montant") as string)?.trim() || "";
     const type = (formData.get("type") as string)?.trim() || "";
+
+    // Auto-générer l'identification si elle est vide
+    if (!identification || identification === "") {
+      identification = `ID_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    }
 
     const montant = montantStr ? parseFloat(montantStr) : NaN;
 
@@ -482,68 +487,67 @@ export default function Index() {
                 </thead>
                 <tbody>
                   {/* Ligne pour ajouter une nouvelle entrée */}
-                  <tr style={{ backgroundColor: "#f0f8ff", borderBottom: "2px solid #ddd" }}>
-                    <td style={{ padding: "8px", color: "#666", fontSize: "0.9em" }}>Nouveau</td>
-                    <td style={{ padding: "8px" }}>
-                      <input
-                        type="text"
-                        name="identification"
-                        placeholder="ID"
-                        style={{ width: "100%", padding: "4px", border: "1px solid #ddd", borderRadius: "4px" }}
-                        required
-                      />
-                    </td>
-                    <td style={{ padding: "8px" }}>
-                      <input
-                        type="text"
-                        name="name"
-                        placeholder="Name"
-                        style={{ width: "100%", padding: "4px", border: "1px solid #ddd", borderRadius: "4px" }}
-                        required
-                      />
-                    </td>
-                    <td style={{ padding: "8px" }}>
-                      <input
-                        type="email"
-                        name="email"
-                        placeholder="Email"
-                        style={{ width: "100%", padding: "4px", border: "1px solid #ddd", borderRadius: "4px" }}
-                        required
-                      />
-                    </td>
-                    <td style={{ padding: "8px" }}>
-                      <input
-                        type="text"
-                        name="code"
-                        placeholder="Code"
-                        style={{ width: "100%", padding: "4px", border: "1px solid #ddd", borderRadius: "4px" }}
-                        required
-                      />
-                    </td>
-                    <td style={{ padding: "8px" }}>
-                      <input
-                        type="number"
-                        step="0.01"
-                        name="montant"
-                        placeholder="Montant"
-                        style={{ width: "100%", padding: "4px", border: "1px solid #ddd", borderRadius: "4px" }}
-                        required
-                      />
-                    </td>
-                    <td style={{ padding: "8px" }}>
-                      <select
-                        name="type"
-                        style={{ width: "100%", padding: "4px", border: "1px solid #ddd", borderRadius: "4px" }}
-                        required
-                      >
-                        <option value="">Type</option>
-                        <option value="%">%</option>
-                        <option value="€">€</option>
-                      </select>
-                    </td>
-                    <td style={{ padding: "8px" }}>
-                      <Form method="post">
-                        <input type="hidden" name="action" value="create_entry" />
+                  <Form method="post">
+                    <input type="hidden" name="action" value="create_entry" />
+                    <tr style={{ backgroundColor: "#f0f8ff", borderBottom: "2px solid #ddd" }}>
+                      <td style={{ padding: "8px", color: "#666", fontSize: "0.9em" }}>Nouveau</td>
+                      <td style={{ padding: "8px" }}>
+                        <input
+                          type="text"
+                          name="identification"
+                          placeholder="ID (auto si vide)"
+                          style={{ width: "100%", padding: "4px", border: "1px solid #ddd", borderRadius: "4px" }}
+                        />
+                      </td>
+                      <td style={{ padding: "8px" }}>
+                        <input
+                          type="text"
+                          name="name"
+                          placeholder="Name"
+                          style={{ width: "100%", padding: "4px", border: "1px solid #ddd", borderRadius: "4px" }}
+                          required
+                        />
+                      </td>
+                      <td style={{ padding: "8px" }}>
+                        <input
+                          type="email"
+                          name="email"
+                          placeholder="Email"
+                          style={{ width: "100%", padding: "4px", border: "1px solid #ddd", borderRadius: "4px" }}
+                          required
+                        />
+                      </td>
+                      <td style={{ padding: "8px" }}>
+                        <input
+                          type="text"
+                          name="code"
+                          placeholder="Code"
+                          style={{ width: "100%", padding: "4px", border: "1px solid #ddd", borderRadius: "4px" }}
+                          required
+                        />
+                      </td>
+                      <td style={{ padding: "8px" }}>
+                        <input
+                          type="number"
+                          step="0.01"
+                          name="montant"
+                          placeholder="Montant"
+                          style={{ width: "100%", padding: "4px", border: "1px solid #ddd", borderRadius: "4px" }}
+                          required
+                        />
+                      </td>
+                      <td style={{ padding: "8px" }}>
+                        <select
+                          name="type"
+                          style={{ width: "100%", padding: "4px", border: "1px solid #ddd", borderRadius: "4px" }}
+                          required
+                        >
+                          <option value="">Type</option>
+                          <option value="%">%</option>
+                          <option value="€">€</option>
+                        </select>
+                      </td>
+                      <td style={{ padding: "8px" }}>
                         <button
                           type="submit"
                           style={{
@@ -558,9 +562,9 @@ export default function Index() {
                         >
                           ✓
                         </button>
-                      </Form>
-                    </td>
-                  </tr>
+                      </td>
+                    </tr>
+                  </Form>
                   
                   {/* Lignes existantes */}
                   {entries.map((entry, index) => (
