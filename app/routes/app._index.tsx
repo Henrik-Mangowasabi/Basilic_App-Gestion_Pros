@@ -74,6 +74,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
     if (result.success) {
       const url = new URL(request.url);
+      url.searchParams.set("success", "entry_created");
       return redirect(url.pathname + url.search);
     }
     return { error: result.error || "Erreur lors de la création de l'entrée" };
@@ -131,6 +132,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const result = await updateMetaobjectEntry(admin, id, updateFields);
     if (result.success) {
       const url = new URL(request.url);
+      url.searchParams.set("success", "entry_updated");
       return redirect(url.pathname + url.search);
     }
     return { error: result.error || "Erreur lors de la modification" };
@@ -389,9 +391,139 @@ function EntryRow({ entry, index }: {
   );
 }
 
+function NewEntryForm() {
+  const [formData, setFormData] = React.useState({
+    identification: "",
+    name: "",
+    email: "",
+    code: "",
+    montant: "",
+    type: "",
+  });
+
+  // Réinitialiser le formulaire après succès
+  React.useEffect(() => {
+    const searchParams = new URLSearchParams(window.location.search);
+    if (searchParams.get("success") === "entry_created") {
+      setFormData({
+        identification: "",
+        name: "",
+        email: "",
+        code: "",
+        montant: "",
+        type: "",
+      });
+    }
+  }, []);
+
+  return (
+    <tr style={{ backgroundColor: "#f0f8ff", borderBottom: "2px solid #ddd" }}>
+      <td style={{ padding: "8px", color: "#666", fontSize: "0.9em" }}>Nouveau</td>
+      <td colSpan={7} style={{ padding: "8px" }}>
+        <Form method="post" style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+          <input type="hidden" name="action" value="create_entry" />
+          <input
+            type="text"
+            name="identification"
+            value={formData.identification}
+            onChange={(e) => setFormData({ ...formData, identification: e.target.value })}
+            placeholder="ID (auto si vide)"
+            style={{ flex: "1", padding: "6px", border: "1px solid #ddd", borderRadius: "4px" }}
+          />
+          <input
+            type="text"
+            name="name"
+            value={formData.name}
+            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+            placeholder="Name *"
+            style={{ flex: "1", padding: "6px", border: "1px solid #ddd", borderRadius: "4px" }}
+            required
+          />
+          <input
+            type="email"
+            name="email"
+            value={formData.email}
+            onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+            placeholder="Email *"
+            style={{ flex: "1", padding: "6px", border: "1px solid #ddd", borderRadius: "4px" }}
+            required
+          />
+          <input
+            type="text"
+            name="code"
+            value={formData.code}
+            onChange={(e) => setFormData({ ...formData, code: e.target.value })}
+            placeholder="Code *"
+            style={{ flex: "1", padding: "6px", border: "1px solid #ddd", borderRadius: "4px" }}
+            required
+          />
+          <input
+            type="number"
+            step="0.01"
+            name="montant"
+            value={formData.montant}
+            onChange={(e) => setFormData({ ...formData, montant: e.target.value })}
+            placeholder="Montant *"
+            style={{ flex: "1", padding: "6px", border: "1px solid #ddd", borderRadius: "4px" }}
+            required
+          />
+          <select
+            name="type"
+            value={formData.type}
+            onChange={(e) => setFormData({ ...formData, type: e.target.value })}
+            style={{ flex: "1", padding: "6px", border: "1px solid #ddd", borderRadius: "4px" }}
+            required
+          >
+            <option value="">Type *</option>
+            <option value="%">%</option>
+            <option value="€">€</option>
+          </select>
+          <button
+            type="submit"
+            style={{
+              padding: "6px 16px",
+              backgroundColor: "#008060",
+              color: "white",
+              border: "none",
+              borderRadius: "4px",
+              cursor: "pointer",
+              fontSize: "0.9em",
+              fontWeight: "500"
+            }}
+          >
+            ✓ Ajouter
+          </button>
+        </Form>
+      </td>
+    </tr>
+  );
+}
+
 export default function Index() {
   const { status, entries } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
+  const [searchParams] = React.useState(() => {
+    if (typeof window !== "undefined") {
+      return new URLSearchParams(window.location.search);
+    }
+    return new URLSearchParams();
+  });
+  
+  const successMessage = searchParams.get("success");
+  const [showSuccess, setShowSuccess] = React.useState(!!successMessage);
+
+  React.useEffect(() => {
+    if (successMessage) {
+      // Nettoyer l'URL après 3 secondes
+      const timer = setTimeout(() => {
+        const url = new URL(window.location.href);
+        url.searchParams.delete("success");
+        window.history.replaceState({}, "", url.toString());
+        setShowSuccess(false);
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [successMessage]);
 
   return (
     <div style={{
@@ -460,73 +592,7 @@ export default function Index() {
                 </thead>
                 <tbody>
                   {/* Ligne pour ajouter une nouvelle entrée */}
-                  <tr style={{ backgroundColor: "#f0f8ff", borderBottom: "2px solid #ddd" }}>
-                    <td style={{ padding: "8px", color: "#666", fontSize: "0.9em" }}>Nouveau</td>
-                    <td colSpan={7} style={{ padding: "8px" }}>
-                      <Form method="post" style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-                        <input type="hidden" name="action" value="create_entry" />
-                        <input
-                          type="text"
-                          name="identification"
-                          placeholder="ID (auto si vide)"
-                          style={{ flex: "1", padding: "6px", border: "1px solid #ddd", borderRadius: "4px" }}
-                        />
-                        <input
-                          type="text"
-                          name="name"
-                          placeholder="Name *"
-                          style={{ flex: "1", padding: "6px", border: "1px solid #ddd", borderRadius: "4px" }}
-                          required
-                        />
-                        <input
-                          type="email"
-                          name="email"
-                          placeholder="Email *"
-                          style={{ flex: "1", padding: "6px", border: "1px solid #ddd", borderRadius: "4px" }}
-                          required
-                        />
-                        <input
-                          type="text"
-                          name="code"
-                          placeholder="Code *"
-                          style={{ flex: "1", padding: "6px", border: "1px solid #ddd", borderRadius: "4px" }}
-                          required
-                        />
-                        <input
-                          type="number"
-                          step="0.01"
-                          name="montant"
-                          placeholder="Montant *"
-                          style={{ flex: "1", padding: "6px", border: "1px solid #ddd", borderRadius: "4px" }}
-                          required
-                        />
-                        <select
-                          name="type"
-                          style={{ flex: "1", padding: "6px", border: "1px solid #ddd", borderRadius: "4px" }}
-                          required
-                        >
-                          <option value="">Type *</option>
-                          <option value="%">%</option>
-                          <option value="€">€</option>
-                        </select>
-                        <button
-                          type="submit"
-                          style={{
-                            padding: "6px 16px",
-                            backgroundColor: "#008060",
-                            color: "white",
-                            border: "none",
-                            borderRadius: "4px",
-                            cursor: "pointer",
-                            fontSize: "0.9em",
-                            fontWeight: "500"
-                          }}
-                        >
-                          ✓ Ajouter
-                        </button>
-                      </Form>
-                    </td>
-                  </tr>
+                  <NewEntryForm />
                   
                   {/* Lignes existantes */}
                   {entries.map((entry, index) => (
