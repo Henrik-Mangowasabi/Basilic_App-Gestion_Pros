@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { useLoaderData, useActionData, Form, redirect, useSearchParams } from "react-router";
+import { useLoaderData, useActionData, Form, redirect, useSearchParams, useSubmit } from "react-router";
 import React from "react";
 import { authenticate } from "../shopify.server";
 import {
@@ -122,7 +122,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     
     if (result.success) {
       const url = new URL(request.url);
-      // Ajout du paramètre pour afficher le message de succès
       url.searchParams.set("success", "entry_deleted");
       return redirect(url.pathname + url.search);
     }
@@ -147,6 +146,7 @@ function EntryRow({ entry, index }: {
 }) {
   const [isEditing, setIsEditing] = React.useState(false);
   const [searchParams] = useSearchParams();
+  const submit = useSubmit(); // Hook pour soumettre le formulaire manuellement
   
   // Initialisation des données
   const getInitialFormData = () => ({
@@ -167,7 +167,6 @@ function EntryRow({ entry, index }: {
     if (searchParams.get("success") === "entry_updated") {
       isUserEditingRef.current = false;
       setIsEditing(false);
-      // On met à jour avec les nouvelles props reçues du loader
       setFormData({
         identification: entry.identification || "",
         name: entry.name || "",
@@ -179,7 +178,7 @@ function EntryRow({ entry, index }: {
     }
   }, [searchParams, entry]);
 
-  // Réinitialisation si l'entrée change (pagination ou rechargement)
+  // Réinitialisation si l'entrée change
   React.useEffect(() => {
     if (previousEntryId.current !== entry.id) {
       previousEntryId.current = entry.id;
@@ -202,10 +201,31 @@ function EntryRow({ entry, index }: {
     setFormData(getInitialFormData());
   };
 
-  // Gestion des touches Clavier (Echap pour annuler)
+  // --- CORRECTION MAJEURE ICI : Utilisation de submit() au lieu d'un <Form> ---
+  const handleSave = () => {
+    // On construit les données à envoyer
+    const dataToSubmit = {
+      action: "update_entry",
+      id: entry.id,
+      identification: formData.identification,
+      name: formData.name,
+      email: formData.email,
+      code: formData.code,
+      montant: formData.montant,
+      type: formData.type
+    };
+
+    // On soumet via le hook useSubmit
+    submit(dataToSubmit, { method: "post" });
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Escape") {
       handleCancel();
+    }
+    if (e.key === "Enter") {
+        e.preventDefault(); // Empêcher comportement par défaut
+        handleSave();
     }
   };
 
@@ -228,44 +248,47 @@ function EntryRow({ entry, index }: {
       </td>
       
       {isEditing ? (
-        // --- MODE ÉDITION ---
-        <Form method="post" style={{ display: "contents" }} onKeyDown={handleKeyDown}>
-          <input type="hidden" name="action" value="update_entry" />
-          <input type="hidden" name="id" value={entry.id} />
-          
+        // --- MODE ÉDITION (Sans <Form> autour des td) ---
+        <>
           <td style={cellStyle}>
-            <input type="text" name="identification" value={formData.identification}
+            <input type="text" value={formData.identification}
               onChange={(e) => setFormData({ ...formData, identification: e.target.value })}
+              onKeyDown={handleKeyDown}
               style={inputStyle} placeholder="Identification" autoFocus
             />
           </td>
           <td style={cellStyle}>
-            <input type="text" name="name" value={formData.name} required
+            <input type="text" value={formData.name} required
               onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              onKeyDown={handleKeyDown}
               style={inputStyle} placeholder="Name"
             />
           </td>
           <td style={cellStyle}>
-            <input type="email" name="email" value={formData.email} required
+            <input type="email" value={formData.email} required
               onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+              onKeyDown={handleKeyDown}
               style={inputStyle} placeholder="Email"
             />
           </td>
           <td style={cellStyle}>
-            <input type="text" name="code" value={formData.code} required
+            <input type="text" value={formData.code} required
               onChange={(e) => setFormData({ ...formData, code: e.target.value })}
+              onKeyDown={handleKeyDown}
               style={inputStyle} placeholder="Code"
             />
           </td>
           <td style={cellStyle}>
-            <input type="number" step="0.01" name="montant" value={formData.montant} required
+            <input type="number" step="0.01" value={formData.montant} required
               onChange={(e) => setFormData({ ...formData, montant: e.target.value })}
+              onKeyDown={handleKeyDown}
               style={inputStyle} placeholder="Montant"
             />
           </td>
           <td style={cellStyle}>
-            <select name="type" value={formData.type} required
+            <select value={formData.type} required
               onChange={(e) => setFormData({ ...formData, type: e.target.value })}
+              onKeyDown={handleKeyDown}
               style={inputStyle}
             >
               <option value="">Sélectionner</option>
@@ -275,7 +298,7 @@ function EntryRow({ entry, index }: {
           </td>
           <td style={cellStyle}>
             <div style={{ display: "flex", gap: "4px" }}>
-              <button type="submit" title="Sauvegarder (Entrée)"
+              <button type="button" onClick={handleSave} title="Sauvegarder (Entrée)"
                 style={{ padding: "6px 12px", backgroundColor: "#008060", color: "white", border: "none", borderRadius: "4px", cursor: "pointer" }}>
                 ✓
               </button>
@@ -285,7 +308,7 @@ function EntryRow({ entry, index }: {
               </button>
             </div>
           </td>
-        </Form>
+        </>
       ) : (
         // --- MODE AFFICHAGE ---
         <>
