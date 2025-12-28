@@ -1,12 +1,13 @@
 // FICHIER : app/lib/metaobject.server.ts
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 import { createShopifyDiscount, updateShopifyDiscount, deleteShopifyDiscount, toggleShopifyDiscount } from "./discount.server";
-import { ensureCustomerPro, removeCustomerProTag } from "./customer.server";
+// On importe la nouvelle fonction updateCustomerEmailInShopify
+import { ensureCustomerPro, removeCustomerProTag, updateCustomerEmailInShopify } from "./customer.server";
 
 const METAOBJECT_TYPE = "mm_pro_de_sante";
 const METAOBJECT_NAME = "MM Pro de santé";
 
-// --- HELPERS ---
+// --- HELPERS & STRUCTURE (Inchangé) ---
 export async function checkMetaobjectExists(admin: AdminApiContext): Promise<boolean> {
   const query = `query { metaobjectDefinitions(first: 250) { edges { node { type } } } }`;
   try {
@@ -21,10 +22,8 @@ export async function checkMetaobjectStatus(admin: AdminApiContext) {
   return { exists };
 }
 
-// --- CREATE STRUCTURE ---
 export async function createMetaobject(admin: AdminApiContext) {
   const exists = await checkMetaobjectExists(admin);
-
   const mutation = `
     mutation metaobjectDefinitionCreate($definition: MetaobjectDefinitionCreateInput!) {
       metaobjectDefinitionCreate(definition: $definition) {
@@ -33,7 +32,6 @@ export async function createMetaobject(admin: AdminApiContext) {
       }
     }
   `;
-
   const fieldDefinitions = [
     { name: "Identification", key: "identification", type: "single_line_text_field", required: true },
     { name: "Name", key: "name", type: "single_line_text_field", required: true },
@@ -44,36 +42,21 @@ export async function createMetaobject(admin: AdminApiContext) {
     { name: "Discount ID", key: "discount_id", type: "single_line_text_field", required: false },
     { name: "Status", key: "status", type: "boolean", required: false }
   ];
-
-  const variables = {
-    definition: {
-      name: METAOBJECT_NAME,
-      type: METAOBJECT_TYPE,
-      fieldDefinitions,
-      capabilities: { publishable: { enabled: true } }
-    }
-  };
-
+  const variables = { definition: { name: METAOBJECT_NAME, type: METAOBJECT_TYPE, fieldDefinitions, capabilities: { publishable: { enabled: true } } } };
   try {
     const response = await admin.graphql(mutation, { variables });
     const data = await response.json() as any;
-    if (data.data?.metaobjectDefinitionCreate?.userErrors?.length > 0) {
-      return { success: false, error: JSON.stringify(data.data.metaobjectDefinitionCreate.userErrors) };
-    }
+    if (data.data?.metaobjectDefinitionCreate?.userErrors?.length > 0) return { success: false, error: JSON.stringify(data.data.metaobjectDefinitionCreate.userErrors) };
     return { success: true };
   } catch (error) { return { success: false, error: String(error) }; }
 }
 
-// --- GET ENTRIES ---
 export async function getMetaobjectEntries(admin: AdminApiContext) {
   const query = `
     query {
       metaobjects(first: 250, type: "${METAOBJECT_TYPE}") {
         edges {
-          node {
-            id
-            fields { key value }
-          }
+          node { id, fields { key value } }
         }
       }
     }
@@ -96,9 +79,8 @@ export async function getMetaobjectEntries(admin: AdminApiContext) {
   } catch (error) { return { entries: [], error: String(error) }; }
 }
 
-// --- CREATE ENTRY (AVEC CLIENT) ---
+// --- CREATE ENTRY (Inchangé) ---
 export async function createMetaobjectEntry(admin: AdminApiContext, fields: any) {
-  // 1. Discount
   const discountName = `Code promo Pro Sante - ${fields.name}`;
   const discountResult = await createShopifyDiscount(admin, {
     code: fields.code,
@@ -106,30 +88,11 @@ export async function createMetaobjectEntry(admin: AdminApiContext, fields: any)
     type: fields.type,
     name: discountName
   });
+  if (!discountResult.success) return { success: false, error: "Erreur création promo Shopify: " + discountResult.error };
 
-  if (!discountResult.success) {
-    return { success: false, error: "Erreur création promo Shopify: " + discountResult.error };
-  }
-
-  // 2. Client Sync
-  console.log("--- Début synchronisation Client ---");
   const clientResult = await ensureCustomerPro(admin, fields.email, fields.name);
-  if (!clientResult.success) {
-      console.warn("⚠️ Attention: Erreur lors de la liaison client :", clientResult.error);
-  } else {
-      console.log("✅ Client synchronisé avec succès :", clientResult.action);
-  }
-
-  // 3. Metaobject
-  const mutation = `
-    mutation metaobjectCreate($metaobject: MetaobjectCreateInput!) {
-      metaobjectCreate(metaobject: $metaobject) {
-        metaobject { id }
-        userErrors { field message }
-      }
-    }
-  `;
-
+  
+  const mutation = `mutation metaobjectCreate($metaobject: MetaobjectCreateInput!) { metaobjectCreate(metaobject: $metaobject) { metaobject { id }, userErrors { field message } } }`;
   const fieldsInput = [
     { key: "identification", value: String(fields.identification) },
     { key: "name", value: String(fields.name) },
@@ -140,22 +103,19 @@ export async function createMetaobjectEntry(admin: AdminApiContext, fields: any)
     { key: "discount_id", value: discountResult.discountId || "" },
     { key: "status", value: "true" }
   ];
-
   try {
     const response = await admin.graphql(mutation, { variables: { metaobject: { type: METAOBJECT_TYPE, fields: fieldsInput } } });
     const data = await response.json() as any;
-    if (data.data?.metaobjectCreate?.userErrors?.length > 0) {
-      return { success: false, error: data.data.metaobjectCreate.userErrors[0].message };
-    }
+    if (data.data?.metaobjectCreate?.userErrors?.length > 0) return { success: false, error: data.data.metaobjectCreate.userErrors[0].message };
     return { success: true };
   } catch (error) { return { success: false, error: String(error) }; }
 }
 
-// --- UPDATE ENTRY (CORRIGÉ & RESTAURÉ) ---
+// --- UPDATE ENTRY (VERSION AVANCÉE - SYNC CLIENT) ---
 export async function updateMetaobjectEntry(admin: AdminApiContext, id: string, fields: any) {
-  // 1. Initialiser le tableau
   const fieldsInput: any[] = [];
   
+  // Construction dynamique des champs
   if (fields.identification) fieldsInput.push({ key: "identification", value: String(fields.identification) });
   if (fields.name) fieldsInput.push({ key: "name", value: String(fields.name) });
   if (fields.email) fieldsInput.push({ key: "email", value: String(fields.email) });
@@ -163,22 +123,36 @@ export async function updateMetaobjectEntry(admin: AdminApiContext, id: string, 
   if (fields.montant) fieldsInput.push({ key: "montant", value: String(fields.montant) });
   if (fields.type) fieldsInput.push({ key: "type", value: String(fields.type) });
 
-  // 2. Récupérer l'ID discount existant
-  const currentEntryQuery = `query($id: ID!) { metaobject(id: $id) { field(key: "discount_id") { value } } }`;
+  // 1. Récupérer les données ACTUELLES avant modification (pour comparer)
+  const currentEntryQuery = `query($id: ID!) { metaobject(id: $id) { fields { key, value } } }`;
   let existingDiscountId = null;
+  let oldEmail = null;
+  let oldName = null;
   
   try {
     const r = await admin.graphql(currentEntryQuery, { variables: { id } });
     const d = await r.json() as any;
-    existingDiscountId = d.data?.metaobject?.field?.value;
-  } catch (e) {
-    console.error("Erreur récupération discount_id:", e);
+    const currentFields = d.data?.metaobject?.fields || [];
+    
+    existingDiscountId = currentFields.find((f:any) => f.key === "discount_id")?.value;
+    oldEmail = currentFields.find((f:any) => f.key === "email")?.value;
+    oldName = currentFields.find((f:any) => f.key === "name")?.value;
+    
+  } catch (e) { console.error("Erreur lecture metaobject:", e); }
+
+  // --- LOGIQUE SYNC CLIENT (NOUVEAU) ---
+  // Si on a un ancien email et que le nouveau est différent, on met à jour Shopify
+  if (oldEmail && fields.email && oldEmail !== fields.email) {
+      console.log(`[UPDATE] Changement d'email détecté : ${oldEmail} -> ${fields.email}`);
+      await updateCustomerEmailInShopify(admin, oldEmail, fields.email, fields.name || oldName);
+  } else if (oldEmail && fields.name && fields.name !== oldName) {
+      // Si seul le nom change, on peut aussi le mettre à jour (optionnel, mais propre)
+      await updateCustomerEmailInShopify(admin, oldEmail, oldEmail, fields.name);
   }
 
-  // 3. Logique de mise à jour Shopify (Discount)
+  // --- LOGIQUE SYNC DISCOUNT ---
   if (existingDiscountId) {
     if (fields.status !== undefined) {
-       console.log(`[UPDATE] Toggle status vers : ${fields.status}`);
        fieldsInput.push({ key: "status", value: String(fields.status) });
        await toggleShopifyDiscount(admin, existingDiscountId, fields.status);
     } 
@@ -194,34 +168,19 @@ export async function updateMetaobjectEntry(admin: AdminApiContext, id: string, 
        }
     }
   } else {
-    if (fields.status !== undefined) {
-        fieldsInput.push({ key: "status", value: String(fields.status) });
-    }
+    if (fields.status !== undefined) fieldsInput.push({ key: "status", value: String(fields.status) });
   }
 
-  // 4. Mise à jour du Métaobjet
-  const mutation = `
-    mutation metaobjectUpdate($id: ID!, $metaobject: MetaobjectUpdateInput!) {
-      metaobjectUpdate(id: $id, metaobject: $metaobject) {
-        metaobject { id }
-        userErrors { field message }
-      }
-    }
-  `;
-
+  // --- UPDATE METAOBJECT ---
+  const mutation = `mutation metaobjectUpdate($id: ID!, $metaobject: MetaobjectUpdateInput!) { metaobjectUpdate(id: $id, metaobject: $metaobject) { metaobject { id }, userErrors { field message } } }`;
   try {
     const response = await admin.graphql(mutation, { variables: { id, metaobject: { fields: fieldsInput } } });
     const data = await response.json() as any;
-    if (data.data?.metaobjectUpdate?.userErrors?.length > 0) {
-      return { success: false, error: data.data.metaobjectUpdate.userErrors[0].message };
-    }
+    if (data.data?.metaobjectUpdate?.userErrors?.length > 0) return { success: false, error: data.data.metaobjectUpdate.userErrors[0].message };
     return { success: true };
-  } catch (error) { 
-    return { success: false, error: String(error) }; 
-  }
+  } catch (error) { return { success: false, error: String(error) }; }
 }
 
-// --- DELETE ENTRY (AVEC CLIENT) ---
 export async function deleteMetaobjectEntry(admin: AdminApiContext, id: string) {
   console.log(`[DELETE] Tentative de suppression pour l'entrée : ${id}`);
 
@@ -244,26 +203,31 @@ export async function deleteMetaobjectEntry(admin: AdminApiContext, id: string) 
     const fields = d.data?.metaobject?.fields || [];
     existingDiscountId = fields.find((f:any) => f.key === "discount_id")?.value;
     entryEmail = fields.find((f:any) => f.key === "email")?.value;
+    
+    console.log(`[DELETE] Données récupérées -> Email: "${entryEmail}", DiscountID: "${existingDiscountId}"`);
   } catch (e) {
-    console.error("[DELETE] Erreur récupération données:", e);
+    console.error("[DELETE] Erreur critique récupération données:", e);
   }
 
-  // 2. Suppression Code Promo
+  // 2. Retirer le tag client (PRIORITÉ : On le fait avant de tout casser)
+  if (entryEmail) {
+      console.log(`[DELETE] Appel suppression tag pour : ${entryEmail}`);
+      // On attend bien la fin de l'opération
+      await removeCustomerProTag(admin, entryEmail);
+  } else {
+      console.warn(`[DELETE] Attention : Pas d'email trouvé dans l'entrée. Impossible de retirer le tag.`);
+  }
+
+  // 3. Suppression Code Promo
   if (existingDiscountId) {
     await deleteShopifyDiscount(admin, existingDiscountId);
   }
 
-  // 3. Retirer le tag client
-  if (entryEmail) {
-      console.log(`[DELETE] Retrait du tag pour l'email : ${entryEmail}`);
-      await removeCustomerProTag(admin, entryEmail);
-  }
-
-  // 4. Suppression Métaobjet
+  // 4. Suppression Métaobjet (L'entrée elle-même)
   const mutation = `mutation metaobjectDelete($id: ID!) { metaobjectDelete(id: $id) { deletedId, userErrors { field message } } }`;
   try {
     await admin.graphql(mutation, { variables: { id } });
-    console.log(`[DELETE] Entrée métaobjet supprimée.`);
+    console.log(`[DELETE] Entrée supprimée avec succès.`);
     return { success: true };
   } catch (error) { 
     return { success: false, error: String(error) }; 
