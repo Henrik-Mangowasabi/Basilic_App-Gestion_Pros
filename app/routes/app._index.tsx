@@ -220,17 +220,26 @@ function EntryRow({ entry, index }: { entry: any; index: number }) {
   );
 }
 
-// --- NEW ENTRY FORM ---
-// IMPORTANT FIX: We removed display:contents and use useSubmit for clean HTML
+// AJOUTER useSearchParams dans les imports en haut si ce n'est pas déjà fait :
+// import { useLoaderData, useActionData, Form, redirect, useSearchParams, useSubmit } from "react-router";
+
 function NewEntryForm() {
   const [formData, setFormData] = React.useState({ identification: "", name: "", email: "", code: "", montant: "", type: "" });
   const submit = useSubmit();
+  const [searchParams] = useSearchParams(); // <--- On récupère les params ici
 
+  // On écoute les changements de l'URL (searchParams)
   React.useEffect(() => {
-    if (new URLSearchParams(window.location.search).get("success") === "entry_created") {
+    if (searchParams.get("success") === "entry_created") {
+      // On vide le formulaire
       setFormData({ identification: "", name: "", email: "", code: "", montant: "", type: "" });
+      
+      // Petite astuce UX : On remet le focus sur le premier champ (Nom) pour enchainer
+      // (Assure-toi que ton input "name" a bien l'id ou le ref si tu veux faire ça, sinon c'est optionnel)
+      const firstInput = document.querySelector('input[name="name"]') as HTMLInputElement;
+      if (firstInput) firstInput.focus();
     }
-  }, []);
+  }, [searchParams]); // <--- IMPORTANT : on relance l'effet quand l'URL change
 
   const handleAdd = (e: React.FormEvent) => {
     e.preventDefault();
@@ -243,7 +252,6 @@ function NewEntryForm() {
   return (
     <tr style={{ backgroundColor: "#f0f8ff", borderBottom: "2px solid #ddd" }}>
       <td style={{...styles.cell, color: "#008060", fontWeight: "bold"}}>New</td>
-      {/* NO FORM TAG HERE to break the table structure */}
       <td style={styles.cell}><input type="text" name="identification" placeholder="Auto" value={formData.identification} onChange={e => setFormData({...formData, identification: e.target.value})} style={styles.input} /></td>
       <td style={styles.cell}><input type="text" name="name" placeholder="Name *" required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} style={styles.input} /></td>
       <td style={styles.cell}><input type="email" name="email" placeholder="Email *" required value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} style={styles.input} /></td>
