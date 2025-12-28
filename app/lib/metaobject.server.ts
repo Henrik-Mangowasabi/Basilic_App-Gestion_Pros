@@ -153,7 +153,7 @@ export async function updateMetaobjectEntry(admin: AdminApiContext, id: string, 
 
   if (existingDiscountId) {
     // Si c'est juste un toggle de status
-    if (fields.status !== undefined && Object.keys(fields).length === 1) {
+    if (fields.status !== undefined) fieldsInput.push({ key: "status", value: String(fields.status) })
        await toggleShopifyDiscount(admin, existingDiscountId, fields.status);
     } else {
        // Sinon mise à jour complète
