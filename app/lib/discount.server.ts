@@ -1,21 +1,15 @@
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 
 /**
- * Crée un code de réduction basique dans Shopify
+ * Crée un code de réduction basique
  */
 export async function createShopifyDiscount(
   admin: AdminApiContext,
-  data: {
-    code: string;
-    montant: number;
-    type: string;
-    name: string;
-  }
+  data: { code: string; montant: number; type: string; name: string; }
 ): Promise<{ success: boolean; discountId?: string; error?: string }> {
   
   const isPercentage = data.type === "%";
   
-  // CORRECTION ICI : on utilise codeDiscountNode au lieu de discountCodeNode
   const mutation = `
     mutation discountCodeBasicCreate($basicCodeDiscount: DiscountCodeBasicInput!) {
       discountCodeBasicCreate(basicCodeDiscount: $basicCodeDiscount) {
@@ -52,11 +46,9 @@ export async function createShopifyDiscount(
     const result = await response.json() as any;
 
     if (result.data?.discountCodeBasicCreate?.userErrors?.length > 0) {
-      console.error("Erreur création discount:", result.data.discountCodeBasicCreate.userErrors);
       return { success: false, error: result.data.discountCodeBasicCreate.userErrors[0].message };
     }
 
-    // CORRECTION ICI AUSSI pour la lecture de la réponse
     return { success: true, discountId: result.data?.discountCodeBasicCreate?.codeDiscountNode?.id };
   } catch (error) {
     return { success: false, error: String(error) };
@@ -64,22 +56,16 @@ export async function createShopifyDiscount(
 }
 
 /**
- * Met à jour un code de réduction existant
+ * Met à jour un code de réduction
  */
 export async function updateShopifyDiscount(
   admin: AdminApiContext,
   discountId: string,
-  data: {
-    code: string;
-    montant: number;
-    type: string;
-    name: string;
-  }
+  data: { code: string; montant: number; type: string; name: string; }
 ): Promise<{ success: boolean; error?: string }> {
   
   const isPercentage = data.type === "%";
 
-  // CORRECTION ICI : on utilise codeDiscountNode
   const mutation = `
     mutation discountCodeBasicUpdate($id: ID!, $basicCodeDiscount: DiscountCodeBasicInput!) {
       discountCodeBasicUpdate(id: $id, basicCodeDiscount: $basicCodeDiscount) {
@@ -115,6 +101,53 @@ export async function updateShopifyDiscount(
     if (result.data?.discountCodeBasicUpdate?.userErrors?.length > 0) {
       return { success: false, error: result.data.discountCodeBasicUpdate.userErrors[0].message };
     }
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}
+
+/**
+ * Active ou Désactive (Status)
+ */
+export async function toggleShopifyDiscount(
+  admin: AdminApiContext,
+  discountId: string,
+  shouldBeActive: boolean
+): Promise<{ success: boolean; error?: string }> {
+  
+  const mutation = `
+    mutation discountCodeBasicUpdate($id: ID!, $basicCodeDiscount: DiscountCodeBasicInput!) {
+      discountCodeBasicUpdate(id: $id, basicCodeDiscount: $basicCodeDiscount) {
+        codeDiscountNode { 
+          id
+          endsAt
+        }
+        userErrors {
+          field
+          message
+        }
+      }
+    }
+  `;
+
+  const variables = {
+    id: discountId,
+    basicCodeDiscount: {
+      // Pour désactiver, on met la date de fin à "maintenant"
+      // Pour activer, on met null (pas de date de fin)
+      endsAt: shouldBeActive ? null : new Date().toISOString()
+    }
+  };
+
+  try {
+    const response = await admin.graphql(mutation, { variables });
+    const result = await response.json() as any;
+
+    if (result.data?.discountCodeBasicUpdate?.userErrors?.length > 0) {
+      console.error("Erreur Toggle:", result.data.discountCodeBasicUpdate.userErrors);
+      return { success: false, error: result.data.discountCodeBasicUpdate.userErrors[0].message };
+    }
 
     return { success: true };
   } catch (error) {
@@ -126,10 +159,11 @@ export async function updateShopifyDiscount(
  * Supprime un code de réduction
  */
 export async function deleteShopifyDiscount(admin: AdminApiContext, discountId: string) {
+  // CORRECTION MAJEURE ICI : deletedCodeDiscountId au lieu de deletedDiscountCodeId
   const mutation = `
     mutation discountCodeDelete($id: ID!) {
       discountCodeDelete(id: $id) {
-        deletedDiscountCodeId
+        deletedCodeDiscountId 
         userErrors {
           field
           message
@@ -150,51 +184,3 @@ export async function deleteShopifyDiscount(admin: AdminApiContext, discountId: 
     return { success: false, error: String(error) };
   }
 }
-
-// À ajouter à la fin de app/lib/discount.server.ts
-
-/**
- * Active ou Désactive un code de réduction
- */
-export async function toggleShopifyDiscount(
-    admin: AdminApiContext,
-    discountId: string,
-    shouldBeActive: boolean
-  ): Promise<{ success: boolean; error?: string }> {
-    
-    const mutation = `
-      mutation discountCodeBasicUpdate($id: ID!, $basicCodeDiscount: DiscountCodeBasicInput!) {
-        discountCodeBasicUpdate(id: $id, basicCodeDiscount: $basicCodeDiscount) {
-          codeDiscountNode {
-            id
-            endsAt
-          }
-          userErrors {
-            field
-            message
-          }
-        }
-      }
-    `;
-  
-    const variables = {
-      id: discountId,
-      basicCodeDiscount: {
-        // Si on veut activer : endsAt = null. Si on veut désactiver : endsAt = maintenant.
-        endsAt: shouldBeActive ? null : new Date().toISOString()
-      }
-    };
-  
-    try {
-      const response = await admin.graphql(mutation, { variables });
-      const result = await response.json() as any;
-  
-      if (result.data?.discountCodeBasicUpdate?.userErrors?.length > 0) {
-        return { success: false, error: result.data.discountCodeBasicUpdate.userErrors[0].message };
-      }
-  
-      return { success: true };
-    } catch (error) {
-      return { success: false, error: String(error) };
-    }
-  }
