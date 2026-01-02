@@ -9,6 +9,7 @@ import {
   createMetaobjectEntry,
   updateMetaobjectEntry,
   deleteMetaobjectEntry,
+  destroyMetaobjectStructure
 } from "../lib/metaobject.server";
 
 // --- LOADER ---
@@ -39,6 +40,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
   const formData = await request.formData();
   const actionType = formData.get("action");
+
+  // 0. RESET TOTAL (DEV ONLY)
+  if (actionType === "destroy_structure") {
+    const result = await destroyMetaobjectStructure(admin);
+    if (result.success) {
+      // On attend un peu que Shopify propage la suppression
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      return redirect("/app"); 
+    }
+    return { error: result.error || "Erreur suppression totale" };
+  }
 
   // 1. Create structure
   if (actionType === "create_structure") {
@@ -302,6 +314,20 @@ export default function Index() {
       boxSizing: "border-box"
     }}>
       <h1 style={{ color: "#202223", marginBottom: "20px", textAlign: "center", fontSize: "1.5rem", fontWeight: "600" }}>Pro Health Management</h1>
+
+      {/* ZONE DANGER DEV */}
+      {status.exists && (
+        <div style={{ marginBottom: "20px", padding: "10px", border: "2px dashed red", borderRadius: "8px", backgroundColor: "#fff5f5", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span style={{ color: "#c00", fontWeight: "bold" }}>🔧 ZONE DÉVELOPPEUR</span>
+          <Form method="post" onSubmit={(e) => !confirm("ATTENTION : Cela va supprimer TOUTES les entrées, TOUS les codes promos associés, retirer TOUS les tags clients et supprimer la structure. Continuer ?") && e.preventDefault()}>
+            <input type="hidden" name="action" value="destroy_structure" />
+            <button type="submit" style={{ backgroundColor: "#d82c0d", color: "white", border: "none", padding: "8px 16px", borderRadius: "4px", cursor: "pointer", fontWeight: "bold" }}>
+              ☢️ SUPPRESSION TOTALE (RESET)
+            </button>
+          </Form>
+        </div>
+      )}
+      {/* FIN ZONE DANGER */}
       
       {showSuccess && <div style={{ ...bannerStyle, backgroundColor: "#008060", color: "white" }}>✓ Action successful!</div>}
       {actionData?.error && <div style={{ ...bannerStyle, backgroundColor: "#fee", color: "#d82c0d", border: "1px solid #fcc" }}>⚠️ {actionData.error}</div>}

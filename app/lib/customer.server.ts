@@ -9,14 +9,55 @@ function cleanEmail(email: string) {
 
 // Pour ta liste (Filtrage manuel pour éviter la liste vide)
 export async function getProSanteCustomers(admin: AdminApiContext) {
-  const query = `query { customers(first: 50, reverse: true) { edges { node { id, firstName, lastName, email, tags, totalSpent, ordersCount, currencyCode } } } }`;
-  try {
-    const response = await admin.graphql(query);
-    const data = await response.json() as any;
-    const all = data.data?.customers?.edges?.map((e: any) => e.node) || [];
-    // Filtrage JS immédiat
-    return all.filter((c: any) => c.tags.includes(PRO_TAG));
-  } catch (error) { return []; }
+  let allCustomers: any[] = [];
+  let hasNextPage = true;
+  let endCursor = null;
+
+  console.log("🔄 Récupération de TOUS les clients Pro...");
+
+  while (hasNextPage) {
+    const query = `
+      query($after: String) {
+        customers(first: 250, after: $after, query: "tag:${PRO_TAG}") {
+          pageInfo {
+            hasNextPage
+            endCursor
+          }
+          edges {
+            node {
+              id
+              firstName
+              lastName
+              email
+              tags
+              totalSpent
+              ordersCount
+              currencyCode
+            }
+          }
+        }
+      }
+    `;
+
+    try {
+      const response = await admin.graphql(query, { variables: { after: endCursor } });
+      const data = await response.json() as any;
+      
+      const newCustomers = data.data?.customers?.edges?.map((e: any) => e.node) || [];
+      allCustomers = [...allCustomers, ...newCustomers];
+
+      // Mise à jour pour la prochaine boucle
+      hasNextPage = data.data?.customers?.pageInfo?.hasNextPage;
+      endCursor = data.data?.customers?.pageInfo?.endCursor;
+
+    } catch (error) {
+      console.error("Erreur pagination clients:", error);
+      hasNextPage = false; // On arrête en cas d'erreur pour éviter une boucle infinie
+    }
+  }
+
+  console.log(`✅ Total clients récupérés : ${allCustomers.length}`);
+  return allCustomers;
 }
 
 export async function ensureCustomerPro(admin: AdminApiContext, rawEmail: string, name: string) {

@@ -298,3 +298,42 @@ export async function deleteMetaobjectEntry(admin: AdminApiContext, id: string) 
     return { success: true };
   } catch (error) { return { success: false, error: String(error) }; }
 }
+
+/**
+ * FONCTION "NUCLÉAIRE" : Nettoie tout et supprime la structure
+ */
+export async function destroyMetaobjectStructure(admin: AdminApiContext) {
+  console.log("☢️ DÉMARRAGE SUPPRESSION TOTALE...");
+
+  // 1. On récupère toutes les entrées existantes pour nettoyer les side-effects
+  const { entries } = await getMetaobjectEntries(admin);
+
+  console.log(`🧹 Nettoyage de ${entries.length} entrées (Tags & Codes Promo)...`);
+
+  // On utilise ta fonction existante deleteMetaobjectEntry pour faire le nettoyage propre (tag + promo)
+  // On le fait en série pour ne pas surcharger l'API
+  for (const entry of entries) {
+    await deleteMetaobjectEntry(admin, entry.id);
+  }
+
+  // 2. Maintenant que c'est vide, on supprime la Définition du Métaobjet
+  const queryDefinition = `query { metaobjectDefinitions(first: 10, query:"type:${METAOBJECT_TYPE}") { edges { node { id } } } }`;
+  
+  try {
+    const r = await admin.graphql(queryDefinition);
+    const d = await r.json() as any;
+    const definitionId = d.data?.metaobjectDefinitions?.edges?.[0]?.node?.id;
+
+    if (definitionId) {
+      console.log(`🗑 Suppression de la définition : ${definitionId}`);
+      const mutation = `mutation metaobjectDefinitionDelete($id: ID!) { metaobjectDefinitionDelete(id: $id) { userErrors { field message } } }`;
+      await admin.graphql(mutation, { variables: { id: definitionId } });
+      return { success: true, message: "Structure et données entièrement supprimées." };
+    } else {
+      return { success: true, message: "Données supprimées, mais structure introuvable (déjà supprimée ?)." };
+    }
+
+  } catch (error) {
+    return { success: false, error: String(error) };
+  }
+}

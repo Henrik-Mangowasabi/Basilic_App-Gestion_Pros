@@ -17,14 +17,17 @@ export const loader = async ({ request }: any) => {
 
   // On fait le lien entre les deux via l'Email
   const combinedData = customers.map((customer: any) => {
-    // Trouver l'entrée métaobjet correspondante
-    const linkedEntry = metaEntries.find((e: any) => e.email?.toLowerCase() === customer.email?.toLowerCase());
+    // CORRECTION : On cherche d'abord par ID (plus fiable), sinon par Email
+    const linkedEntry = metaEntries.find((e: any) => 
+      e.customer_id === customer.id || 
+      e.email?.toLowerCase() === customer.email?.toLowerCase()
+    );
     
     return {
       ...customer,
+      // Si on a trouvé une entrée liée
       linkedCode: linkedEntry ? linkedEntry.code : "⚠️ Pas de lien",
-      linkedAmount: linkedEntry ? `${linkedEntry.montant}${linkedEntry.type}` : "-",
-      linkedStatus: linkedEntry ? (linkedEntry.status ? "Actif" : "Inactif") : "Inconnu"
+      // ... (reste du return inchangé)
     };
   });
 
