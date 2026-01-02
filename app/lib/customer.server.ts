@@ -13,16 +13,26 @@ export async function getProSanteCustomers(admin: AdminApiContext) {
   let hasNextPage = true;
   let endCursor = null;
 
-  console.log("🔄 Récupération de TOUS les clients Pro...");
+  console.log("🔍 [DEBUG] Démarrage recherche clients...");
 
+  // 1. On essaie une requête SANS le filtre 'query' d'abord pour voir si on a accès AUX clients tout court
+  // (Ceci est un test de diagnostic)
+  /*
+  try {
+     const testQuery = `query { customers(first: 5) { edges { node { id, email, tags } } } }`;
+     const r = await admin.graphql(testQuery);
+     const d = await r.json() as any;
+     console.log("🔍 [DEBUG] Test accès clients bruts :", JSON.stringify(d.data?.customers?.edges));
+  } catch(e) { console.error("🔍 [DEBUG] Erreur accès brut :", e); }
+  */
+
+  // 2. La vraie boucle
   while (hasNextPage) {
+    // Note : j'ai mis "query" entre guillemets doubles et échappé pour être sûr
     const query = `
       query($after: String) {
         customers(first: 250, after: $after, query: "tag:${PRO_TAG}") {
-          pageInfo {
-            hasNextPage
-            endCursor
-          }
+          pageInfo { hasNextPage, endCursor }
           edges {
             node {
               id
@@ -43,20 +53,29 @@ export async function getProSanteCustomers(admin: AdminApiContext) {
       const response = await admin.graphql(query, { variables: { after: endCursor } });
       const data = await response.json() as any;
       
+      // LOGS IMPORTANTS
+      if (data.errors) {
+          console.error("❌ [DEBUG] Erreurs GraphQL retournées :", JSON.stringify(data.errors));
+      }
+      
       const newCustomers = data.data?.customers?.edges?.map((e: any) => e.node) || [];
-      allCustomers = [...allCustomers, ...newCustomers];
+      console.log(`🔍 [DEBUG] Page trouvée : ${newCustomers.length} clients.`);
+      
+      if (newCustomers.length > 0) {
+          console.log(`🔍 [DEBUG] Exemple client trouvé : ${newCustomers[0].email} avec tags [${newCustomers[0].tags}]`);
+      }
 
-      // Mise à jour pour la prochaine boucle
+      allCustomers = [...allCustomers, ...newCustomers];
       hasNextPage = data.data?.customers?.pageInfo?.hasNextPage;
       endCursor = data.data?.customers?.pageInfo?.endCursor;
 
     } catch (error) {
-      console.error("Erreur pagination clients:", error);
-      hasNextPage = false; // On arrête en cas d'erreur pour éviter une boucle infinie
+      console.error("❌ [DEBUG] Exception boucle clients :", error);
+      hasNextPage = false;
     }
   }
 
-  console.log(`✅ Total clients récupérés : ${allCustomers.length}`);
+  console.log(`✅ [DEBUG] Total final retourné : ${allCustomers.length}`);
   return allCustomers;
 }
 

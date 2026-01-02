@@ -1,3 +1,4 @@
+// FICHIER : app/routes/app._index.tsx
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { useLoaderData, useActionData, Form, redirect, useSearchParams, useSubmit } from "react-router";
 import React from "react";
@@ -9,7 +10,7 @@ import {
   createMetaobjectEntry,
   updateMetaobjectEntry,
   deleteMetaobjectEntry,
-  destroyMetaobjectStructure
+  destroyMetaobjectStructure // <--- Import de la fonction nucléaire
 } from "../lib/metaobject.server";
 
 // --- LOADER ---
@@ -45,9 +46,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (actionType === "destroy_structure") {
     const result = await destroyMetaobjectStructure(admin);
     if (result.success) {
-      // On attend un peu que Shopify propage la suppression
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      return redirect("/app"); 
+       // On attend un peu que Shopify propage la suppression
+       await new Promise(resolve => setTimeout(resolve, 2000));
+       // Redirection avec message spécifique
+       return redirect("/app?success=structure_deleted"); 
     }
     return { error: result.error || "Erreur suppression totale" };
   }
@@ -57,7 +59,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const result = await createMetaobject(admin);
     if (result.success) {
       await new Promise(resolve => setTimeout(resolve, 2000));
-      return redirect("/app");
+      // Redirection avec message spécifique
+      return redirect("/app?success=structure_created");
     }
     return { error: result.error || "Structure error" };
   }
@@ -220,7 +223,7 @@ function EntryRow({ entry, index }: { entry: any; index: number }) {
           <td style={styles.cell}>
             <div style={{ display: "flex", gap: "4px" }}>
               <button type="button" onClick={() => setIsEditing(true)} style={{...styles.btnAction, backgroundColor: "#008060", color: "white"}} title="Edit">✎</button>
-              <Form method="post" onSubmit={e => !confirm("Delete?") && e.preventDefault()}>
+              <Form method="post" onSubmit={e => !confirm("Voulez-vous vraiment supprimer cette entrée ?") && e.preventDefault()}>
                 <input type="hidden" name="action" value="delete_entry" /><input type="hidden" name="id" value={entry.id} />
                 <button type="submit" style={{...styles.btnAction, backgroundColor: "#d82c0d", color: "white"}} title="Delete">🗑</button>
               </Form>
@@ -232,27 +235,19 @@ function EntryRow({ entry, index }: { entry: any; index: number }) {
   );
 }
 
-// Assure-toi d'avoir importé useSearchParams en haut du fichier :
-// import { useSearchParams, useSubmit } from "react-router";
-
 function NewEntryForm() {
   const [formData, setFormData] = React.useState({ identification: "", name: "", email: "", code: "", montant: "", type: "" });
   const submit = useSubmit();
-  
-  // NOUVEAU : On utilise le hook pour écouter l'URL
   const [searchParams] = useSearchParams();
 
-  // Ce code se lance à chaque fois que l'URL change
+  // Reset form on success
   React.useEffect(() => {
     if (searchParams.get("success") === "entry_created") {
-      // 1. On vide les champs
       setFormData({ identification: "", name: "", email: "", code: "", montant: "", type: "" });
-      
-      // 2. Astuce Pro : On remet le focus sur le champ "Nom" pour enchaîner
       const nameInput = document.querySelector('input[name="name"]') as HTMLInputElement;
       if (nameInput) nameInput.focus();
     }
-  }, [searchParams]); // <--- L'astuce est ici : on surveille searchParams
+  }, [searchParams]);
 
   const handleAdd = (e: React.FormEvent) => {
     e.preventDefault();
@@ -288,6 +283,15 @@ export default function Index() {
   const actionData = useActionData<typeof action>();
   const [searchParams, setSearchParams] = useSearchParams();
   const successType = searchParams.get("success");
+
+  // LOGIQUE DES MESSAGES
+  let successMessage = "";
+  if (successType === "entry_created") successMessage = "Entrée créée avec succès";
+  else if (successType === "entry_updated") successMessage = "Entrée mise à jour";
+  else if (successType === "entry_deleted") successMessage = "Entrée supprimée";
+  else if (successType === "structure_created") successMessage = "Création réussite du métaobject";
+  else if (successType === "structure_deleted") successMessage = "Suppression réussite du métaobject";
+
   const [showSuccess, setShowSuccess] = React.useState(!!successType);
 
   React.useEffect(() => {
@@ -314,10 +318,10 @@ export default function Index() {
       boxSizing: "border-box"
     }}>
       <h1 style={{ color: "#202223", marginBottom: "20px", textAlign: "center", fontSize: "1.5rem", fontWeight: "600" }}>Pro Health Management</h1>
-
+      
       {/* ZONE DANGER DEV */}
       {status.exists && (
-        <div style={{ marginBottom: "20px", padding: "10px", border: "2px dashed red", borderRadius: "8px", backgroundColor: "#fff5f5", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div style={{ marginBottom: "20px", padding: "10px", border: "2px dashed red", borderRadius: "8px", backgroundColor: "#fff5f5", display: "flex", justifyContent: "space-between", alignItems: "center", maxWidth: "1200px", margin: "0 auto 20px" }}>
           <span style={{ color: "#c00", fontWeight: "bold" }}>🔧 ZONE DÉVELOPPEUR</span>
           <Form method="post" onSubmit={(e) => !confirm("ATTENTION : Cela va supprimer TOUTES les entrées, TOUS les codes promos associés, retirer TOUS les tags clients et supprimer la structure. Continuer ?") && e.preventDefault()}>
             <input type="hidden" name="action" value="destroy_structure" />
@@ -329,7 +333,7 @@ export default function Index() {
       )}
       {/* FIN ZONE DANGER */}
       
-      {showSuccess && <div style={{ ...bannerStyle, backgroundColor: "#008060", color: "white" }}>✓ Action successful!</div>}
+      {showSuccess && <div style={{ ...bannerStyle, backgroundColor: "#008060", color: "white" }}>✓ {successMessage}</div>}
       {actionData?.error && <div style={{ ...bannerStyle, backgroundColor: "#fee", color: "#d82c0d", border: "1px solid #fcc" }}>⚠️ {actionData.error}</div>}
       
       {status.exists ? (
