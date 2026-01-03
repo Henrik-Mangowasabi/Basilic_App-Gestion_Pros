@@ -1,6 +1,6 @@
 // FICHIER : app/routes/app._index.tsx
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { useLoaderData, useActionData, Form, redirect, useSearchParams, useSubmit } from "react-router";
+import { useLoaderData, useActionData, Form, redirect, useSearchParams, useSubmit, useNavigation } from "react-router"; // <--- Ajout de useNavigation
 import React from "react";
 import { authenticate } from "../shopify.server";
 import {
@@ -101,7 +101,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const result = await createMetaobjectEntry(admin, { identification, name, email, code, montant, type });
 
     if (result.success) {
-      // Astuce pour recharger la page proprement sans renvoyer le formulaire si on refresh
       const url = new URL(request.url);
       url.searchParams.set("success", "entry_created");
       return redirect(url.pathname + url.search);
@@ -121,8 +120,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     if (!id) return { error: "ID manquant" };
     
-    // C'est ici que la magie opère : on envoie les nouvelles données au backend
-    // Le backend (metaobject.server.ts) se chargera de comparer et mettre à jour Shopify (Client/Discount)
     const result = await updateMetaobjectEntry(admin, id, {
       identification, name, email, code, montant: parseFloat(montantStr), type
     });
@@ -151,7 +148,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   return { error: "Action inconnue" };
 };
 
-// --- STYLES (En attendant le CSS stylé !) ---
+// --- PETIT COMPOSANT SPINNER (CSS IN-JS) ---
+const Spinner = ({ color = "white", size = "16px" }) => (
+  <div style={{
+    width: size, height: size,
+    border: `2px solid rgba(0,0,0,0.1)`,
+    borderTop: `2px solid ${color}`,
+    borderRadius: "50%",
+    animation: "spin 0.8s linear infinite",
+    display: "inline-block"
+  }}>
+    <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
+  </div>
+);
+
+// --- STYLES ---
 const styles = {
   cell: { padding: "12px 10px", fontSize: "0.9rem", verticalAlign: "middle", borderBottom: "1px solid #eee" },
   input: { 
@@ -163,7 +174,7 @@ const styles = {
   btnAction: {
     padding: "0", borderRadius: "4px", border: "none", cursor: "pointer", 
     display: "flex", alignItems: "center", justifyContent: "center", width: "32px", height: "32px",
-    fontSize: "1.1rem"
+    fontSize: "1.1rem", transition: "opacity 0.2s"
   }
 };
 
@@ -172,7 +183,13 @@ function EntryRow({ entry, index }: { entry: any; index: number }) {
   const [isEditing, setIsEditing] = React.useState(false);
   const [searchParams] = useSearchParams();
   const submit = useSubmit();
+  const nav = useNavigation(); // <--- Hook pour savoir ce qui charge
   
+  // On détecte si CETTE ligne est en cours de modification ou suppression
+  const isUpdatingThis = nav.formData?.get("action") === "update_entry" && nav.formData?.get("id") === entry.id;
+  const isDeletingThis = nav.formData?.get("action") === "delete_entry" && nav.formData?.get("id") === entry.id;
+  const isBusy = isUpdatingThis || isDeletingThis;
+
   const getInitialFormData = () => ({
     identification: entry.identification || "",
     name: entry.name || "",
@@ -184,16 +201,12 @@ function EntryRow({ entry, index }: { entry: any; index: number }) {
 
   const [formData, setFormData] = React.useState(getInitialFormData);
   
-  // Réinitialiser le formulaire si on change de ligne ou si l'update a réussi
   React.useEffect(() => {
     if (searchParams.get("success") === "entry_updated") setIsEditing(false);
   }, [searchParams]);
 
   const handleSave = () => {
-    // On envoie tout au serveur
-    submit({
-      action: "update_entry", id: entry.id, ...formData
-    }, { method: "post" });
+    submit({ action: "update_entry", id: entry.id, ...formData }, { method: "post" });
   };
 
   const handleCancel = () => {
@@ -206,7 +219,7 @@ function EntryRow({ entry, index }: { entry: any; index: number }) {
     if (e.key === "Enter") { e.preventDefault(); handleSave(); }
   };
 
-  const rowStyle = { backgroundColor: index % 2 === 0 ? "white" : "#f9fafb" };
+  const rowStyle = { backgroundColor: index % 2 === 0 ? "white" : "#f9fafb", opacity: isBusy ? 0.5 : 1 };
 
   return (
     <tr style={rowStyle}>
@@ -216,20 +229,22 @@ function EntryRow({ entry, index }: { entry: any; index: number }) {
       
       {isEditing ? (
         <>
-          <td style={styles.cell}><input type="text" value={formData.identification} onChange={e => setFormData({...formData, identification: e.target.value})} onKeyDown={handleKeyDown} style={styles.input} placeholder="ID" /></td>
-          <td style={styles.cell}><input type="text" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} onKeyDown={handleKeyDown} style={styles.input} /></td>
-          <td style={styles.cell}><input type="email" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} onKeyDown={handleKeyDown} style={styles.input} /></td>
-          <td style={styles.cell}><input type="text" value={formData.code} onChange={e => setFormData({...formData, code: e.target.value})} onKeyDown={handleKeyDown} style={styles.input} /></td>
-          <td style={{...styles.cell, width: "100px"}}><input type="number" step="0.01" value={formData.montant} onChange={e => setFormData({...formData, montant: e.target.value})} onKeyDown={handleKeyDown} style={styles.input} /></td>
+          <td style={styles.cell}><input disabled={isBusy} type="text" value={formData.identification} onChange={e => setFormData({...formData, identification: e.target.value})} onKeyDown={handleKeyDown} style={styles.input} placeholder="ID" /></td>
+          <td style={styles.cell}><input disabled={isBusy} type="text" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} onKeyDown={handleKeyDown} style={styles.input} /></td>
+          <td style={styles.cell}><input disabled={isBusy} type="email" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} onKeyDown={handleKeyDown} style={styles.input} /></td>
+          <td style={styles.cell}><input disabled={isBusy} type="text" value={formData.code} onChange={e => setFormData({...formData, code: e.target.value})} onKeyDown={handleKeyDown} style={styles.input} /></td>
+          <td style={{...styles.cell, width: "100px"}}><input disabled={isBusy} type="number" step="0.01" value={formData.montant} onChange={e => setFormData({...formData, montant: e.target.value})} onKeyDown={handleKeyDown} style={styles.input} /></td>
           <td style={{...styles.cell, width: "80px"}}>
-            <select value={formData.type} onChange={e => setFormData({...formData, type: e.target.value})} onKeyDown={handleKeyDown} style={styles.input}>
+            <select disabled={isBusy} value={formData.type} onChange={e => setFormData({...formData, type: e.target.value})} onKeyDown={handleKeyDown} style={styles.input}>
               <option value="%">%</option><option value="€">€</option>
             </select>
           </td>
           <td style={{...styles.cell, width: "100px"}}>
             <div style={{ display: "flex", gap: "6px" }}>
-              <button type="button" onClick={handleSave} style={{...styles.btnAction, backgroundColor: "#008060", color: "white"}} title="Enregistrer">✓</button>
-              <button type="button" onClick={handleCancel} style={{...styles.btnAction, backgroundColor: "#f4f4f4", color: "#333", border: "1px solid #ddd"}} title="Annuler">✕</button>
+              <button type="button" onClick={handleSave} disabled={isBusy} style={{...styles.btnAction, backgroundColor: "#008060", color: "white"}} title="Enregistrer">
+                {isUpdatingThis ? <Spinner /> : "✓"}
+              </button>
+              <button type="button" onClick={handleCancel} disabled={isBusy} style={{...styles.btnAction, backgroundColor: "#f4f4f4", color: "#333", border: "1px solid #ddd"}} title="Annuler">✕</button>
             </div>
           </td>
         </>
@@ -243,10 +258,14 @@ function EntryRow({ entry, index }: { entry: any; index: number }) {
           <td style={styles.cell}>{entry.type}</td>
           <td style={styles.cell}>
             <div style={{ display: "flex", gap: "6px" }}>
-              <button type="button" onClick={() => setIsEditing(true)} style={{...styles.btnAction, backgroundColor: "white", border: "1px solid #ccc", color: "#555"}} title="Modifier">✎</button>
+              <button type="button" disabled={isBusy} onClick={() => setIsEditing(true)} style={{...styles.btnAction, backgroundColor: "white", border: "1px solid #ccc", color: "#555"}} title="Modifier">
+                 ✎
+              </button>
               <Form method="post" onSubmit={e => !confirm("Voulez-vous vraiment supprimer ce Pro ? \n\nCela supprimera aussi :\n- Le code promo associé\n- Le tag 'pro_sante' sur le client") && e.preventDefault()}>
                 <input type="hidden" name="action" value="delete_entry" /><input type="hidden" name="id" value={entry.id} />
-                <button type="submit" style={{...styles.btnAction, backgroundColor: "#fff0f0", border: "1px solid #fcc", color: "#d82c0d"}} title="Supprimer">🗑</button>
+                <button type="submit" disabled={isBusy} style={{...styles.btnAction, backgroundColor: "#fff0f0", border: "1px solid #fcc", color: "#d82c0d"}} title="Supprimer">
+                  {isDeletingThis ? <Spinner color="#d82c0d" /> : "🗑"}
+                </button>
               </Form>
             </div>
           </td>
@@ -261,8 +280,11 @@ function NewEntryForm() {
   const [formData, setFormData] = React.useState({ identification: "", name: "", email: "", code: "", montant: "", type: "" });
   const submit = useSubmit();
   const [searchParams] = useSearchParams();
+  const nav = useNavigation();
 
-  // Reset après création
+  // On détecte si on est en train de créer une entrée
+  const isCreating = nav.formData?.get("action") === "create_entry";
+
   React.useEffect(() => {
     if (searchParams.get("success") === "entry_created") {
       setFormData({ identification: "", name: "", email: "", code: "", montant: "", type: "" });
@@ -277,18 +299,20 @@ function NewEntryForm() {
   return (
     <tr style={{ backgroundColor: "#f0f8ff", borderBottom: "2px solid #cce5ff" }}>
       <td style={{...styles.cell, color: "#005bd3", fontWeight: "bold", borderLeft: "4px solid #005bd3"}}>Nouveau</td>
-      <td style={styles.cell}><input type="text" name="identification" placeholder="Auto" value={formData.identification} onChange={e => setFormData({...formData, identification: e.target.value})} style={styles.input} /></td>
-      <td style={styles.cell}><input type="text" name="name" placeholder="Nom *" required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} style={styles.input} /></td>
-      <td style={styles.cell}><input type="email" name="email" placeholder="Email *" required value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} style={styles.input} /></td>
-      <td style={styles.cell}><input type="text" name="code" placeholder="Code *" required value={formData.code} onChange={e => setFormData({...formData, code: e.target.value})} style={styles.input} /></td>
-      <td style={styles.cell}><input type="number" step="0.01" name="montant" placeholder="Valeur *" required value={formData.montant} onChange={e => setFormData({...formData, montant: e.target.value})} style={styles.input} /></td>
+      <td style={styles.cell}><input disabled={isCreating} type="text" name="identification" placeholder="Auto" value={formData.identification} onChange={e => setFormData({...formData, identification: e.target.value})} style={styles.input} /></td>
+      <td style={styles.cell}><input disabled={isCreating} type="text" name="name" placeholder="Nom *" required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} style={styles.input} /></td>
+      <td style={styles.cell}><input disabled={isCreating} type="email" name="email" placeholder="Email *" required value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} style={styles.input} /></td>
+      <td style={styles.cell}><input disabled={isCreating} type="text" name="code" placeholder="Code *" required value={formData.code} onChange={e => setFormData({...formData, code: e.target.value})} style={styles.input} /></td>
+      <td style={styles.cell}><input disabled={isCreating} type="number" step="0.01" name="montant" placeholder="Valeur *" required value={formData.montant} onChange={e => setFormData({...formData, montant: e.target.value})} style={styles.input} /></td>
       <td style={styles.cell}>
-        <select name="type" required value={formData.type} onChange={e => setFormData({...formData, type: e.target.value})} style={styles.input}>
+        <select disabled={isCreating} name="type" required value={formData.type} onChange={e => setFormData({...formData, type: e.target.value})} style={styles.input}>
           <option value="">Type</option><option value="%">%</option><option value="€">€</option>
         </select>
       </td>
       <td style={styles.cell}>
-        <button type="button" onClick={handleAdd} style={{ padding: "8px 12px", backgroundColor: "#008060", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "bold", width: "100%" }}>Ajouter</button>
+        <button type="button" disabled={isCreating} onClick={handleAdd} style={{ padding: "8px 12px", backgroundColor: isCreating ? "#8bcbb6" : "#008060", color: "white", border: "none", borderRadius: "4px", cursor: isCreating ? "default" : "pointer", fontWeight: "bold", width: "100%", display: "flex", justifyContent: "center", alignItems: "center", gap: "5px" }}>
+          {isCreating ? <><Spinner /> Ajout...</> : "Ajouter"}
+        </button>
       </td>
     </tr>
   );
@@ -299,7 +323,12 @@ export default function Index() {
   const { status, entries } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const [searchParams, setSearchParams] = useSearchParams();
+  const nav = useNavigation();
   const successType = searchParams.get("success");
+
+  // Détection des états globaux
+  const isDestroying = nav.formData?.get("action") === "destroy_structure";
+  const isInitializing = nav.formData?.get("action") === "create_structure";
 
   // Messages de succès
   let successMessage = "";
@@ -369,7 +398,7 @@ export default function Index() {
             </div>
           </div>
 
-          {/* ZONE DANGER (Déplacée en bas pour sécurité) */}
+          {/* ZONE DANGER */}
           <div style={{ marginTop: "60px", padding: "20px", borderTop: "1px solid #eee", textAlign: "center" }}>
              <details>
                <summary style={{ cursor: "pointer", color: "#666", fontSize: "0.9rem" }}>Afficher les options développeur (Zone Danger)</summary>
@@ -377,8 +406,8 @@ export default function Index() {
                  <p style={{ color: "#d82c0d", fontWeight: "bold", fontSize: "0.9rem", margin: "0 0 10px 0" }}>⚠️ ATTENTION : SUPPRESSION TOTALE DE L'APPLICATION</p>
                  <Form method="post" onSubmit={(e) => !confirm("ATTENTION ULTIME : \n\nVous allez supprimer :\n1. Tous les Pro de santé enregistrés\n2. Tous les codes promo liés\n3. Retirer le tag de tous les clients\n4. Détruire la définition du Métaobjet\n\nÊtes-vous sûr ?") && e.preventDefault()}>
                    <input type="hidden" name="action" value="destroy_structure" />
-                   <button type="submit" style={{ backgroundColor: "#d82c0d", color: "white", border: "none", padding: "8px 16px", borderRadius: "4px", cursor: "pointer", fontWeight: "bold", fontSize: "0.85rem" }}>
-                     ☢️ TOUT SUPPRIMER & RÉINITIALISER
+                   <button type="submit" disabled={isDestroying} style={{ backgroundColor: "#d82c0d", color: "white", border: "none", padding: "8px 16px", borderRadius: "4px", cursor: isDestroying ? "default" : "pointer", fontWeight: "bold", fontSize: "0.85rem", opacity: isDestroying ? 0.7 : 1, display: "flex", alignItems: "center", gap: "10px", margin: "0 auto" }}>
+                     {isDestroying ? <><Spinner /> Suppression en cours...</> : "☢️ TOUT SUPPRIMER & RÉINITIALISER"}
                    </button>
                  </Form>
                </div>
@@ -393,8 +422,8 @@ export default function Index() {
              <p style={{ color: "#666", marginBottom: "30px" }}>L'application n'est pas encore initialisée. Cliquez ci-dessous pour créer la structure de base dans Shopify.</p>
              <Form method="post">
                 <input type="hidden" name="action" value="create_structure" />
-                <button type="submit" style={{ padding: "12px 24px", backgroundColor: "#008060", color: "white", border: "none", borderRadius: "8px", cursor: "pointer", fontSize: "1rem", fontWeight: "600" }}>
-                   🚀 Initialiser l'application
+                <button type="submit" disabled={isInitializing} style={{ padding: "12px 24px", backgroundColor: "#008060", color: "white", border: "none", borderRadius: "8px", cursor: "pointer", fontSize: "1rem", fontWeight: "600", display: "flex", alignItems: "center", gap: "10px", margin: "0 auto", opacity: isInitializing ? 0.7 : 1 }}>
+                   {isInitializing ? <><Spinner /> Initialisation...</> : "🚀 Initialiser l'application"}
                 </button>
              </Form>
           </div>
