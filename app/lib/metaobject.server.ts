@@ -161,7 +161,7 @@ export async function createMetaobjectEntry(admin: AdminApiContext, fields: any)
   }
 }
 
-// --- UPDATE (Logique préservée) ---
+// --- UPDATE (CORRIGÉ : SYNCHRO NOM ET EMAIL) ---
 export async function updateMetaobjectEntry(admin: AdminApiContext, id: string, fields: any) {
   console.log(`🔄 Update demandé pour ${id}`, fields);
 
@@ -183,6 +183,7 @@ export async function updateMetaobjectEntry(admin: AdminApiContext, id: string, 
   const mergedMontant = fields.montant !== undefined ? fields.montant : (oldData.montant ? parseFloat(oldData.montant) : 0);
   const mergedType = fields.type || oldData.type;
 
+  // 2. Mise à jour du Code Promo
   if (oldData.discount_id) {
     if(fields.name || fields.code || fields.montant || fields.type) {
         const discountName = `Code promo Pro Sante - ${mergedName}`;
@@ -200,10 +201,27 @@ export async function updateMetaobjectEntry(admin: AdminApiContext, id: string, 
     }
   }
 
-  if (oldData.customer_id && fields.email && fields.email.trim().toLowerCase() !== (oldData.email || "").trim().toLowerCase()) {
-    await updateCustomerEmailInShopify(admin, oldData.customer_id, fields.email, mergedName);
+  // 3. Mise à jour du Client Shopify (CORRECTION ICI)
+  // On met à jour si l'email change OU si le nom change
+  if (oldData.customer_id) {
+    const hasEmailChanged = fields.email && fields.email.trim().toLowerCase() !== (oldData.email || "").trim().toLowerCase();
+    const hasNameChanged = fields.name && fields.name !== oldData.name;
+
+    if (hasEmailChanged || hasNameChanged) {
+        console.log(`👤 Changement infos client détecté (Nom ou Email). Mise à jour Shopify...`);
+        // On utilise l'email fourni ou l'ancien si pas changé
+        const emailToUse = fields.email || oldData.email;
+        const updateClientResult = await updateCustomerEmailInShopify(admin, oldData.customer_id, emailToUse, mergedName);
+        
+        if (updateClientResult.success) {
+            console.log("✅ Client Shopify mis à jour.");
+        } else {
+            console.error("❌ Echec update client:", updateClientResult.error);
+        }
+    }
   }
 
+  // 4. Mise à jour du Métaobjet
   const fieldsInput: any[] = [];
   if (fields.identification) fieldsInput.push({ key: "identification", value: String(fields.identification) });
   if (fields.name) fieldsInput.push({ key: "name", value: String(fields.name) });
