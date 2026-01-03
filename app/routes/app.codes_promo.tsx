@@ -13,7 +13,52 @@ export const loader = async ({ request }: any) => {
   if (!status.exists) return { entries: [], isInitialized: false };
 
   const { entries } = await getMetaobjectEntries(admin);
-  return { entries, isInitialized: true };
+
+  // --- LOGIQUE AJOUTÉE : RÉCUPÉRATION DES VRAIS NOMS CLIENTS ---
+  // 1. Récupérer les ID clients liés
+  const customerIds = entries
+    .map((e: any) => e.customer_id)
+    .filter((id: string) => id && id.startsWith("gid://shopify/Customer/"));
+
+  // 2. Faire une requête groupée pour avoir les noms (Optimisation Perf)
+  const nameMap = new Map<string, string>();
+  
+  if (customerIds.length > 0) {
+    const query = `#graphql
+      query getCustomerNames($ids: [ID!]!) {
+        nodes(ids: $ids) {
+          ... on Customer {
+            id
+            firstName
+            lastName
+          }
+        }
+      }
+    `;
+    try {
+        const response = await admin.graphql(query, { variables: { ids: customerIds } });
+        const data = await response.json();
+        const nodes = data.data?.nodes || [];
+        nodes.forEach((node: any) => {
+            if (node) {
+               // On stocke "Prénom Nom"
+               nameMap.set(node.id, `${node.firstName} ${node.lastName}`);
+            }
+        });
+    } catch (e) {
+        console.error("Erreur récupération noms clients", e);
+    }
+  }
+
+  // 3. Remplacer le nom interne par le vrai nom client (si trouvé)
+  const enrichedEntries = entries.map((entry: any) => ({
+      ...entry,
+      // Si on a trouvé le client Shopify, on affiche son Prénom/Nom. 
+      // Sinon on garde le nom interne du métaobjet (fallback).
+      displayName: nameMap.get(entry.customer_id) || entry.name
+  }));
+
+  return { entries: enrichedEntries, isInitialized: true };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -25,6 +70,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   if (actionType === "toggle_status") {
     const newStatus = formData.get("new_status") === "true"; 
+    // Note: updateMetaobjectEntry gère maintenant le toggleShopifyDiscount en interne (via tes updates précédents)
     const result = await updateMetaobjectEntry(admin, id, { status: newStatus });
     return result.success ? { success: true } : { success: false, error: result.error };
   }
@@ -169,13 +215,15 @@ export default function CodesPromoPage() {
 
                     return (
                       <tr key={entry.id}>
-                        {/* Nom */}
-                        <td style={{ ...styles.cell, backgroundColor: bgStandard, fontWeight: "600", color: "#333" }}>{entry.name}</td>
+                        {/* Nom (Utilise displayName qui est le Nom Réel du client si dispo) */}
+                        <td style={{ ...styles.cell, backgroundColor: bgStandard, fontWeight: "600", color: "#333" }}>
+                            {entry.displayName || entry.name}
+                        </td>
                         <td style={{ ...styles.cell, backgroundColor: bgStandard, color: "#666" }}>{entry.email}</td>
                         
                         {/* Nom Code */}
                         <td style={{ ...styles.cell, backgroundColor: bgPromo, ...borderLeftSep, color: "#555", fontSize: "0.85rem", fontStyle: "italic" }}>
-                           Code promo Pro Sante - {entry.name}
+                           Code promo Pro Sante - {entry.displayName || entry.name}
                         </td>
 
                         {/* Code Promo */}
