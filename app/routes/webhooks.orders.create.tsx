@@ -3,6 +3,24 @@ import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
+  // Log IMMÉDIAT pour voir si la route est appelée
+  console.log(`🚨 ===== WEBHOOK ORDERS/CREATE APPELÉ =====`);
+  console.log(`🚨 Méthode: ${request.method}`);
+  console.log(`🚨 URL: ${request.url}`);
+  console.log(`🚨 Headers:`, Object.fromEntries(request.headers.entries()));
+  
+  // Gérer les requêtes GET (pour tests)
+  if (request.method === "GET") {
+    return new Response(JSON.stringify({ 
+      message: "Webhook orders/create endpoint", 
+      method: "Use POST to trigger webhook",
+      registered: true 
+    }), { 
+      status: 200, 
+      headers: { "Content-Type": "application/json" } 
+    });
+  }
+  
   try {
     const { admin, payload, shop, session, topic } = await authenticate.webhook(request);
     
@@ -132,41 +150,65 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   // Le Scenario BURN est géré automatiquement par Shopify (Checkout) !
   if (usedCode) {
     
-    // Essayer différentes façons d'extraire le sous-total
+    // Calculer le sous-total AVANT réduction pour le CA généré
     let orderAmount = 0;
     
     // Log détaillé pour debug
     console.log(`🔍 Extraction du sous-total - Valeurs disponibles:`, {
       subtotal_price: order.subtotal_price,
       subtotal_price_set: order.subtotal_price_set,
-      'subtotal_price_set.shop_money': order.subtotal_price_set?.shop_money,
-      'subtotal_price_set.shopMoney': order.subtotal_price_set?.shopMoney,
-      total_price: order.total_price,
-      total_price_set: order.total_price_set
+      discount_codes: order.discount_codes,
+      discount_applications: order.discount_applications,
+      line_items: order.line_items?.length || 0
     });
     
-    // Essayer toutes les variantes possibles
-    if (order.subtotal_price_set?.shop_money?.amount) {
-      orderAmount = parseFloat(String(order.subtotal_price_set.shop_money.amount));
-      console.log(`✅ Sous-total trouvé via subtotal_price_set.shop_money.amount: ${orderAmount}`);
-    } else if (order.subtotal_price_set?.shopMoney?.amount) {
-      orderAmount = parseFloat(String(order.subtotal_price_set.shopMoney.amount));
-      console.log(`✅ Sous-total trouvé via subtotal_price_set.shopMoney.amount: ${orderAmount}`);
-    } else if (order.subtotal_price) {
-      orderAmount = parseFloat(String(order.subtotal_price));
-      console.log(`✅ Sous-total trouvé via subtotal_price: ${orderAmount}`);
-    } else if (order.subtotal_price_set?.amount) {
-      orderAmount = parseFloat(String(order.subtotal_price_set.amount));
-      console.log(`✅ Sous-total trouvé via subtotal_price_set.amount: ${orderAmount}`);
-    } else if (order.total_price_set?.shop_money?.amount) {
-      orderAmount = parseFloat(String(order.total_price_set.shop_money.amount));
-      console.log(`⚠️ Utilisation du total_price_set.shop_money.amount (pas idéal): ${orderAmount}`);
-    } else if (order.total_price_set?.shopMoney?.amount) {
-      orderAmount = parseFloat(String(order.total_price_set.shopMoney.amount));
-      console.log(`⚠️ Utilisation du total_price_set.shopMoney.amount (pas idéal): ${orderAmount}`);
-    } else if (order.total_price) {
-      orderAmount = parseFloat(String(order.total_price));
-      console.log(`⚠️ Utilisation du total_price (pas idéal): ${orderAmount}`);
+    // Méthode 1: Calculer depuis les line_items (sous-total avant réduction)
+    if (order.line_items && order.line_items.length > 0) {
+      orderAmount = order.line_items.reduce((sum: number, item: any) => {
+        const price = parseFloat(item.price || item.original_price || "0");
+        const quantity = parseInt(item.quantity || "1");
+        return sum + (price * quantity);
+      }, 0);
+      console.log(`✅ Sous-total calculé depuis line_items (avant réduction): ${orderAmount}€`);
+    }
+    // Méthode 2: Sous-total après réduction + montant de la réduction
+    else if (order.subtotal_price_set?.shop_money?.amount) {
+      const subtotalAfterDiscount = parseFloat(String(order.subtotal_price_set.shop_money.amount));
+      // Calculer le montant total des réductions
+      let totalDiscount = 0;
+      if (order.discount_codes && order.discount_codes.length > 0) {
+        totalDiscount = order.discount_codes.reduce((sum: number, dc: any) => {
+          return sum + parseFloat(dc.amount || "0");
+        }, 0);
+      } else if (order.discount_applications && order.discount_applications.length > 0) {
+        // Pour les réductions en pourcentage, on doit calculer différemment
+        // On utilise la différence entre le total des items et le subtotal
+        totalDiscount = 0; // Sera calculé si nécessaire
+      }
+      orderAmount = subtotalAfterDiscount + totalDiscount;
+      console.log(`✅ Sous-total calculé: ${subtotalAfterDiscount}€ (après réduction) + ${totalDiscount}€ (réduction) = ${orderAmount}€ (avant réduction)`);
+    }
+    // Méthode 3: Fallback - utiliser subtotal_price directement
+    else if (order.subtotal_price) {
+      const subtotalAfterDiscount = parseFloat(String(order.subtotal_price));
+      // Essayer d'ajouter la réduction si disponible
+      let totalDiscount = 0;
+      if (order.discount_codes && order.discount_codes.length > 0) {
+        totalDiscount = order.discount_codes.reduce((sum: number, dc: any) => {
+          return sum + parseFloat(dc.amount || "0");
+        }, 0);
+      }
+      orderAmount = subtotalAfterDiscount + totalDiscount;
+      console.log(`✅ Sous-total calculé: ${subtotalAfterDiscount}€ + ${totalDiscount}€ (réduction) = ${orderAmount}€`);
+    }
+    // Méthode 4: Fallback - utiliser total_price (moins frais de port et taxes)
+    else if (order.total_price_set?.shop_money?.amount) {
+      const total = parseFloat(String(order.total_price_set.shop_money.amount));
+      // Soustraire les frais de port et taxes si disponibles
+      const shipping = parseFloat(order.total_shipping_price_set?.shop_money?.amount || order.total_shipping_price || "0");
+      const tax = parseFloat(order.total_tax_set?.shop_money?.amount || order.total_tax || "0");
+      orderAmount = total - shipping - tax;
+      console.log(`⚠️ Sous-total estimé: ${total}€ - ${shipping}€ (port) - ${tax}€ (taxes) = ${orderAmount}€`);
     }
     
     if (orderAmount === 0) {
@@ -174,7 +216,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     console.log(`🔍 Recherche du pro avec le code: ${usedCode}`);
-    console.log(`💰 Montant de la commande (sous-total): ${orderAmount}€`);
+    console.log(`💰 Montant de la commande (sous-total AVANT réduction): ${orderAmount}€`);
+    console.log(`ℹ️ Note: Le sous-total avant réduction (${orderAmount}€) est utilisé pour calculer le CA généré.`);
 
     // Requête corrigée : récupérer tous les metaobjects et filtrer côté code
     const queryAllMetaobjects = `#graphql
@@ -272,45 +315,70 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
         // A. Trouver le Compte Crédit du client Shopify
         if (customerIdValue) {
-          const queryAccount = `#graphql
-            query getStoreCredit($id: ID!) {
-              customer(id: $id) {
-                storeCreditAccounts(first: 1) {
-                  edges { node { id } }
-                }
-              }
-            }
-          `;
-          const rAccount = await adminContext.graphql(queryAccount, { variables: { id: customerIdValue }});
-          const dAccount = await rAccount.json();
-          const accountId = dAccount.data?.customer?.storeCreditAccounts?.edges?.[0]?.node?.id;
-
-          if (accountId) {
-            // B. Faire le virement (Mutation Native)
-            const mutationCredit = `#graphql
-              mutation creditStore($id: ID!, $amount: MoneyInput!) {
-                storeCreditAccountCredit(id: $id, creditInput: {amount: $amount}) {
-                  storeCreditAccountTransaction { amount { amount } }
-                  userErrors { message }
+          try {
+            const queryAccount = `#graphql
+              query getStoreCredit($id: ID!) {
+                customer(id: $id) {
+                  storeCreditAccounts(first: 1) {
+                    edges { node { id } }
+                  }
                 }
               }
             `;
+            const rAccount = await adminContext.graphql(queryAccount, { variables: { id: customerIdValue }});
+            const dAccount = await rAccount.json() as any;
             
-            const rCredit = await adminContext.graphql(mutationCredit, { 
-              variables: { 
-                id: accountId, 
-                amount: { amount: amountToDeposit, currencyCode: "EUR" } 
+            // Vérifier s'il y a des erreurs de permissions
+            if (dAccount.errors) {
+              const permissionError = dAccount.errors.find((e: any) => e.message?.includes("storeCreditAccounts") || e.message?.includes("Access denied"));
+              if (permissionError) {
+                console.error(`❌ Permissions Store Credit manquantes. Erreur: ${permissionError.message}`);
+                console.error(`⚠️ L'application doit être réinstallée avec les scopes: read_store_credit_accounts, write_store_credit_account_transactions`);
+                console.log(`ℹ️ Le metaobject sera mis à jour mais le crédit ne sera pas versé. Réinstallez l'application pour activer le crédit.`);
+                // Continuer sans créditer le compte
+              } else {
+                throw new Error(dAccount.errors.map((e: any) => e.message).join(", "));
               }
-            });
-            const dCredit = await rCredit.json();
-
-            if (dCredit.data?.storeCreditAccountCredit?.userErrors?.length > 0) {
-              console.error("❌ Erreur Virement:", dCredit.data.storeCreditAccountCredit.userErrors);
             } else {
-              console.log("✅ Virement effectué avec succès sur le compte Shopify !");
+              const accountId = dAccount.data?.customer?.storeCreditAccounts?.edges?.[0]?.node?.id;
+
+              if (accountId) {
+                // B. Faire le virement (Mutation Native)
+                const mutationCredit = `#graphql
+                  mutation creditStore($id: ID!, $amount: MoneyInput!) {
+                    storeCreditAccountCredit(id: $id, creditInput: {amount: $amount}) {
+                      storeCreditAccountTransaction { amount { amount } }
+                      userErrors { message }
+                    }
+                  }
+                `;
+                
+                const rCredit = await adminContext.graphql(mutationCredit, { 
+                  variables: { 
+                    id: accountId, 
+                    amount: { amount: amountToDeposit, currencyCode: "EUR" } 
+                  }
+                });
+                const dCredit = await rCredit.json() as any;
+
+                if (dCredit.data?.storeCreditAccountCredit?.userErrors?.length > 0) {
+                  console.error("❌ Erreur Virement:", dCredit.data.storeCreditAccountCredit.userErrors);
+                } else {
+                  console.log("✅ Virement effectué avec succès sur le compte Shopify !");
+                }
+              } else {
+                console.error("❌ Pas de compte Crédit trouvé pour ce client (Fonctionnalité active ?)");
+              }
             }
-          } else {
-            console.error("❌ Pas de compte Crédit trouvé pour ce client (Fonctionnalité active ?)");
+          } catch (creditError: any) {
+            // Si c'est une erreur de permissions, on continue quand même
+            if (creditError?.message?.includes("storeCreditAccounts") || creditError?.message?.includes("Access denied")) {
+              console.error(`❌ Permissions Store Credit manquantes: ${creditError.message}`);
+              console.error(`⚠️ L'application doit être réinstallée avec les scopes: read_store_credit_accounts, write_store_credit_account_transactions`);
+              console.log(`ℹ️ Le metaobject sera mis à jour mais le crédit ne sera pas versé. Réinstallez l'application pour activer le crédit.`);
+            } else {
+              console.error(`❌ Erreur lors de la récupération du compte Store Credit:`, creditError);
+            }
           }
         } else {
           console.warn(`⚠️ Aucun customer_id trouvé pour ce metaobject, impossible de créditer le compte`);
