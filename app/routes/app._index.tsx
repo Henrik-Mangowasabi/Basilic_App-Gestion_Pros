@@ -402,12 +402,18 @@ export default function Index() {
       {/* MODIF : Affichage conditionnel de la Navigation et du Guide */}
       {status.exists && (
         <>
-          <div style={{ display: "flex", justifyContent: "center", gap: "15px", marginBottom: "20px" }}>
+          <div style={{ display: "flex", justifyContent: "center", gap: "15px", marginBottom: "20px", flexWrap: "wrap" }}>
             <Link to="/app/codes_promo" className="nav-btn" style={styles.navButton}>
               <span>🏷️</span> Gestion Codes Promo →
             </Link>
             <Link to="/app/clients" className="nav-btn" style={styles.navButton}>
               <span>👥</span> Gestion Clients Pros →
+            </Link>
+            <Link to="/app/tutoriel" className="nav-btn" style={styles.navButton}>
+              <span>📘</span> Tutoriel →
+            </Link>
+            <Link to="/app/analytique" className="nav-btn" style={styles.navButton}>
+              <span>📊</span> Analytique →
             </Link>
           </div>
 

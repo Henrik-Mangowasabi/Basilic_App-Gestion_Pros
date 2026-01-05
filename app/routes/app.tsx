@@ -25,6 +25,8 @@ export default function App() {
           <s-link href="/app">Gestion Pros de Santé</s-link>
           <s-link href="/app/codes_promo">Gestion Codes Promo</s-link>
           <s-link href="/app/clients">Gestion Clients Pros</s-link>
+          <s-link href="/app/tutoriel">Tutoriel</s-link>
+          <s-link href="/app/analytique">Analytique</s-link>
         </s-app-nav>
         <Outlet />
       </PolarisAppProvider>

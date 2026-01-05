@@ -154,9 +154,11 @@ export default function CodesPromoPage() {
         Gestion des Codes Promo
       </h1>
 
-      <div style={{ display: "flex", justifyContent: "center", gap: "15px", marginBottom: "20px" }}>
+      <div style={{ display: "flex", justifyContent: "center", gap: "15px", marginBottom: "20px", flexWrap: "wrap" }}>
         <Link to="/app" className="nav-btn" style={styles.navButton}><span>🏥</span> Gestion Pros de Santé →</Link>
         <Link to="/app/clients" className="nav-btn" style={styles.navButton}><span>👥</span> Gestion Clients Pros →</Link>
+        <Link to="/app/tutoriel" className="nav-btn" style={styles.navButton}><span>📘</span> Tutoriel →</Link>
+        <Link to="/app/analytique" className="nav-btn" style={styles.navButton}><span>📊</span> Analytique →</Link>
       </div>
 
       <div style={{ maxWidth: containerMaxWidth, margin: "0 auto" }}>

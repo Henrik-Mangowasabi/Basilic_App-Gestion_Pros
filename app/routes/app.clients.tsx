@@ -131,9 +131,11 @@ export default function ClientsPage() {
 
       <h1 style={{ color: "#202223", marginBottom: "20px", textAlign: "center", fontSize: "1.8rem", fontWeight: "700" }}>Gestion des Clients Pros</h1>
 
-      <div style={{ display: "flex", justifyContent: "center", gap: "15px", marginBottom: "20px" }}>
+      <div style={{ display: "flex", justifyContent: "center", gap: "15px", marginBottom: "20px", flexWrap: "wrap" }}>
         <Link to="/app" className="nav-btn" style={styles.navButton}><span>🏥</span> Gestion Pros de Santé →</Link>
         <Link to="/app/codes_promo" className="nav-btn" style={styles.navButton}><span>🏷️</span> Gestion Codes Promo →</Link>
+        <Link to="/app/tutoriel" className="nav-btn" style={styles.navButton}><span>📘</span> Tutoriel →</Link>
+        <Link to="/app/analytique" className="nav-btn" style={styles.navButton}><span>📊</span> Analytique →</Link>
       </div>
 
       <div style={{ maxWidth: containerMaxWidth, margin: "0 auto" }}>
