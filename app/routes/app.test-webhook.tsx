@@ -14,7 +14,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   // Récupérer les commandes récentes avec codes promo
   const ordersQuery = `#graphql
     query getRecentOrders {
-      orders(first: 10, sortKey: CREATED_AT, reverse: true) {
+      orders(first: 50, sortKey: CREATED_AT, reverse: true) {
         edges {
           node {
             id
@@ -32,9 +32,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
                 currencyCode
               }
             }
-            discountCodes {
+            discountApplications(first: 10) {
               code
-              amount
+              value
+              valueType
             }
           }
         }
@@ -43,11 +44,35 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   `;
   
   let orders: any[] = [];
+  let ordersError: string | null = null;
   try {
     const ordersResponse = await admin.graphql(ordersQuery);
     const ordersData = await ordersResponse.json() as any;
-    orders = ordersData.data?.orders?.edges?.map((e: any) => e.node) || [];
+    
+    if (ordersData.errors) {
+      ordersError = ordersData.errors.map((e: any) => e.message).join(", ");
+      console.error("Erreur GraphQL commandes:", ordersData.errors);
+    } else {
+      orders = ordersData.data?.orders?.edges?.map((e: any) => {
+        const node = e.node;
+        // Convertir discountApplications en discountCodes pour compatibilité
+        const discountCodes = (node.discountApplications || []).map((da: any) => ({
+          code: da.code,
+          amount: da.value
+        }));
+        
+        return {
+          id: node.id,
+          name: node.name,
+          createdAt: node.createdAt,
+          total: node.totalPriceSet?.shopMoney?.amount || "0",
+          subtotal: node.subtotalPriceSet?.shopMoney?.amount || "0",
+          discountCodes: discountCodes
+        };
+      }) || [];
+    }
   } catch (e) {
+    ordersError = e instanceof Error ? e.message : String(e);
     console.error("Erreur récupération commandes:", e);
   }
   
@@ -60,19 +85,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       cache_orders_count: e.cache_orders_count || "0",
       cache_credit_earned: e.cache_credit_earned || "0"
     })),
-    orders: orders.map((o: any) => ({
-      id: o.id,
-      name: o.name,
-      createdAt: o.createdAt,
-      total: o.totalPriceSet?.shopMoney?.amount || "0",
-      subtotal: o.subtotalPriceSet?.shopMoney?.amount || "0",
-      discountCodes: o.discountCodes || []
-    }))
+    orders,
+    ordersError
   };
 };
 
 export default function TestWebhookPage() {
-  const { metaobjects, orders } = useLoaderData<typeof loader>();
+  const { metaobjects, orders, ordersError } = useLoaderData<typeof loader>();
   
   return (
     <div style={{ padding: "20px", fontFamily: "-apple-system, sans-serif", backgroundColor: "#f6f6f7", minHeight: "100vh" }}>
@@ -114,7 +133,11 @@ export default function TestWebhookPage() {
       
       <div style={{ backgroundColor: "white", padding: "20px", borderRadius: "8px", boxShadow: "0 2px 4px rgba(0,0,0,0.1)" }}>
         <h2 style={{ color: "#005bd3", marginTop: 0 }}>Commandes Récentes ({orders.length})</h2>
-        {orders.length === 0 ? (
+        {ordersError ? (
+          <div style={{ padding: "15px", backgroundColor: "#f8d7da", borderRadius: "4px", color: "#721c24" }}>
+            <strong>Erreur lors de la récupération des commandes :</strong> {ordersError}
+          </div>
+        ) : orders.length === 0 ? (
           <p style={{ color: "#666" }}>Aucune commande trouvée</p>
         ) : (
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -172,17 +195,17 @@ export default function TestWebhookPage() {
       
       <div style={{ marginTop: "20px", padding: "15px", backgroundColor: "#d1ecf1", borderRadius: "8px", border: "1px solid #0c5460" }}>
         <h3 style={{ marginTop: 0, color: "#0c5460" }}>📍 Où trouver les webhooks app-specific ?</h3>
+        <p style={{ color: "#0c5460", marginBottom: "10px" }}>
+          <strong>Important :</strong> Les webhooks sont dans le <strong>Dev Dashboard</strong>, pas le Partner Dashboard !
+        </p>
         <ol style={{ color: "#0c5460", lineHeight: "1.8" }}>
-          <li>Allez sur <strong>https://partners.shopify.com</strong></li>
-          <li>Connectez-vous avec votre compte</li>
-          <li>Cliquez sur &quot;Apps&quot; dans le menu de gauche</li>
-          <li>Sélectionnez votre app &quot;App MM - Gestion Pros - JM&quot;</li>
-          <li>Dans le menu de l&apos;app, cliquez sur &quot;Configuration&quot; ou &quot;App setup&quot;</li>
-          <li>Cherchez la section &quot;Webhooks&quot; ou &quot;Event subscriptions&quot;</li>
-          <li>Vous devriez voir &quot;orders/create&quot; listé là-bas</li>
+          <li>Dans le Partner Dashboard, cliquez sur le lien <strong>&quot;visiter votre Dev Dashboard&quot;</strong> dans la bannière bleue</li>
+          <li>Ou allez directement sur : <strong>https://partners.shopify.com/[VOTRE_ID]/apps/[APP_ID]/dev_dashboard</strong></li>
+          <li>Dans le Dev Dashboard, cherchez la section <strong>&quot;Webhooks&quot;</strong> ou <strong>&quot;Event subscriptions&quot;</strong></li>
+          <li>Vous devriez voir <strong>&quot;orders/create&quot;</strong> listé avec l&apos;URL : <code>https://mm-gestion-pros-sante.onrender.com/webhooks/orders/create</code></li>
         </ol>
         <p style={{ color: "#0c5460", marginTop: "10px", fontStyle: "italic" }}>
-          <strong>Note :</strong> Les webhooks app-specific ne sont PAS visibles dans les notifications de votre store Shopify. Ils sont uniquement visibles dans le Partner Dashboard.
+          <strong>Note :</strong> L&apos;erreur &quot;Unexpected Server Error&quot; quand vous accédez directement au webhook est normale. Les webhooks doivent être appelés par Shopify avec la signature HMAC correcte.
         </p>
       </div>
     </div>

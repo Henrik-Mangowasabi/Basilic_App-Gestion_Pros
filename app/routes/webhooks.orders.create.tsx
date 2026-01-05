@@ -3,11 +3,15 @@ import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { admin, payload } = await authenticate.webhook(request);
-  if (!admin) {
-    console.error("❌ Webhook: admin non disponible");
-    return new Response();
-  }
+  try {
+    const { admin, payload } = await authenticate.webhook(request);
+    if (!admin) {
+      console.error("❌ Webhook: admin non disponible");
+      return new Response(JSON.stringify({ error: "Admin non disponible" }), { 
+        status: 200, 
+        headers: { "Content-Type": "application/json" } 
+      });
+    }
 
   const order = payload as any;
   const discountCodes = order.discount_codes || [];
@@ -207,10 +211,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         console.error("❌ Message d'erreur:", e.message);
         console.error("❌ Stack:", e.stack);
       }
+      // Retourner une réponse valide même en cas d'erreur pour éviter que Shopify réessaie
+      return new Response(JSON.stringify({ error: String(e) }), { 
+        status: 200, 
+        headers: { "Content-Type": "application/json" } 
+      });
     }
   } else {
     console.log("ℹ️ Aucun code promo détecté dans cette commande, webhook ignoré");
   }
 
-  return new Response();
+  return new Response(JSON.stringify({ success: true }), { 
+    status: 200, 
+    headers: { "Content-Type": "application/json" } 
+  });
+  } catch (error) {
+    // Erreur d'authentification du webhook (HMAC invalide, etc.)
+    console.error("❌ Erreur authentification webhook:", error);
+    return new Response(JSON.stringify({ error: "Erreur authentification" }), { 
+      status: 401, 
+      headers: { "Content-Type": "application/json" } 
+    });
+  }
 };
