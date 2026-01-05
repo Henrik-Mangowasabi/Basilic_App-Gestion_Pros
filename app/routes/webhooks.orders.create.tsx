@@ -54,25 +54,40 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       const allMetaobjects = data.data?.metaobjects?.edges || [];
       console.log(`📊 Nombre total de metaobjects trouvés: ${allMetaobjects.length}`);
 
-      // Chercher le metaobject avec le code correspondant
+      // Chercher le metaobject avec le code correspondant (comparaison insensible à la casse)
       let metaobjectNode: any = null;
       let customerIdValue: string | null = null;
+      const usedCodeUpper = usedCode.toUpperCase().trim();
 
+      console.log(`🔍 Recherche du code promo (normalisé): "${usedCodeUpper}"`);
+      console.log(`📋 Codes disponibles dans les metaobjects:`);
+      
       for (const edge of allMetaobjects) {
         const node = edge.node;
         const codeField = node.fields.find((f: any) => f.key === "code");
-        if (codeField && codeField.value === usedCode) {
-          metaobjectNode = node;
-          const customerIdField = node.fields.find((f: any) => f.key === "customer_id");
-          customerIdValue = customerIdField?.value || null;
-          console.log(`✅ Metaobject trouvé pour le code ${usedCode}: ${node.id}`);
-          break;
+        if (codeField) {
+          const metaCodeUpper = (codeField.value || "").toUpperCase().trim();
+          console.log(`  - "${codeField.value}" (normalisé: "${metaCodeUpper}")`);
+          if (metaCodeUpper === usedCodeUpper) {
+            metaobjectNode = node;
+            const customerIdField = node.fields.find((f: any) => f.key === "customer_id");
+            customerIdValue = customerIdField?.value || null;
+            console.log(`✅ Metaobject trouvé pour le code ${usedCode} (match: ${codeField.value}): ${node.id}`);
+            break;
+          }
         }
       }
 
       if (!metaobjectNode) {
         console.warn(`⚠️ Aucun metaobject trouvé pour le code promo: ${usedCode}`);
-        return new Response();
+        console.warn(`⚠️ Codes disponibles:`);
+        allMetaobjects.forEach((edge: any) => {
+          const codeField = edge.node.fields.find((f: any) => f.key === "code");
+          if (codeField) {
+            console.warn(`  - "${codeField.value}"`);
+          }
+        });
+        return new Response("Aucun metaobject trouvé", { status: 200 });
       }
 
       // 1. Récupération des compteurs actuels
@@ -175,10 +190,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       });
       
       const updateData = await updateResponse.json() as any;
-      if (updateData.data?.metaobjectUpdate?.userErrors?.length > 0) {
+      if (updateData.errors) {
+        console.error("❌ Erreur GraphQL lors de la mise à jour:", updateData.errors);
+      } else if (updateData.data?.metaobjectUpdate?.userErrors?.length > 0) {
         console.error("❌ Erreur lors de la mise à jour du metaobject:", updateData.data.metaobjectUpdate.userErrors);
       } else {
         console.log(`✅ Metaobject mis à jour avec succès ! Nouveau CA: ${newRevenue}€ | Nouvelles commandes: ${newCount}`);
+        console.log(`📝 Détails de la mise à jour:`);
+        console.log(`   - cache_revenue: ${currentRevenue} → ${newRevenue}`);
+        console.log(`   - cache_orders_count: ${currentCount} → ${newCount}`);
+        console.log(`   - cache_credit_earned: ${previousCreditEarned} → ${totalCreditShouldBe}`);
       }
     } catch (e) { 
       console.error("❌ Erreur Webhook:", e);
