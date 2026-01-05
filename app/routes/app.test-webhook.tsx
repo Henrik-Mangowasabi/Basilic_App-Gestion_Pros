@@ -1,6 +1,6 @@
 // Route de test pour vérifier et tester manuellement le webhook
 import type { LoaderFunctionArgs } from "react-router";
-import { useLoaderData } from "react-router";
+import { useLoaderData, Link } from "react-router";
 import { authenticate } from "../shopify.server";
 import { getMetaobjectEntries } from "../lib/metaobject.server";
 
@@ -76,7 +76,11 @@ export default function TestWebhookPage() {
   
   return (
     <div style={{ padding: "20px", fontFamily: "-apple-system, sans-serif", backgroundColor: "#f6f6f7", minHeight: "100vh" }}>
-      <h1 style={{ color: "#202223", marginBottom: "30px" }}>🔍 Debug Webhook - Test</h1>
+      <h1 style={{ color: "#202223", marginBottom: "20px" }}>🔍 Debug Webhook - Test</h1>
+      
+      <div style={{ display: "flex", gap: "15px", marginBottom: "20px", flexWrap: "wrap" }}>
+        <Link to="/app" style={{ textDecoration: "none", color: "#008060", fontWeight: "600", backgroundColor: "white", border: "1px solid #c9cccf", padding: "8px 16px", borderRadius: "4px" }}>← Retour</Link>
+      </div>
       
       <div style={{ backgroundColor: "white", padding: "20px", borderRadius: "8px", marginBottom: "20px", boxShadow: "0 2px 4px rgba(0,0,0,0.1)" }}>
         <h2 style={{ color: "#008060", marginTop: 0 }}>Metaobjects ({metaobjects.length})</h2>
@@ -164,6 +168,22 @@ export default function TestWebhookPage() {
           <li>Vérifiez les logs sur Render dans la section &quot;Logs&quot; pour voir si le webhook est appelé</li>
           <li>Redéployez l&apos;application avec <code style={{ backgroundColor: "#fff", padding: "2px 6px", borderRadius: "3px" }}>npm run deploy</code> pour synchroniser les webhooks</li>
         </ol>
+      </div>
+      
+      <div style={{ marginTop: "20px", padding: "15px", backgroundColor: "#d1ecf1", borderRadius: "8px", border: "1px solid #0c5460" }}>
+        <h3 style={{ marginTop: 0, color: "#0c5460" }}>📍 Où trouver les webhooks app-specific ?</h3>
+        <ol style={{ color: "#0c5460", lineHeight: "1.8" }}>
+          <li>Allez sur <strong>https://partners.shopify.com</strong></li>
+          <li>Connectez-vous avec votre compte</li>
+          <li>Cliquez sur &quot;Apps&quot; dans le menu de gauche</li>
+          <li>Sélectionnez votre app &quot;App MM - Gestion Pros - JM&quot;</li>
+          <li>Dans le menu de l&apos;app, cliquez sur &quot;Configuration&quot; ou &quot;App setup&quot;</li>
+          <li>Cherchez la section &quot;Webhooks&quot; ou &quot;Event subscriptions&quot;</li>
+          <li>Vous devriez voir &quot;orders/create&quot; listé là-bas</li>
+        </ol>
+        <p style={{ color: "#0c5460", marginTop: "10px", fontStyle: "italic" }}>
+          <strong>Note :</strong> Les webhooks app-specific ne sont PAS visibles dans les notifications de votre store Shopify. Ils sont uniquement visibles dans le Partner Dashboard.
+        </p>
       </div>
     </div>
   );

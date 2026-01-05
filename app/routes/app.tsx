@@ -27,6 +27,7 @@ export default function App() {
           <s-link href="/app/clients">Gestion Clients Pros</s-link>
           <s-link href="/app/tutoriel">Tutoriel</s-link>
           <s-link href="/app/analytique">Analytique</s-link>
+          <s-link href="/app/test-webhook">🔍 Debug Webhook</s-link>
         </s-app-nav>
         <Outlet />
       </PolarisAppProvider>
