@@ -14,17 +14,147 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
   const order = payload as any;
-  const discountCodes = order.discount_codes || [];
-
+  
+  // Log complet du payload pour debug
   console.log(`📦 Webhook orders/create déclenché pour la commande: ${order.name || order.id}`);
-  console.log(`📋 Codes promo détectés:`, discountCodes.map((dc: any) => dc.code).join(", ") || "Aucun");
+  console.log(`🔍 Structure du payload:`, JSON.stringify({
+    name: order.name,
+    id: order.id,
+    subtotal_price: order.subtotal_price,
+    total_price: order.total_price,
+    discount_codes: order.discount_codes,
+    discount_applications: order.discount_applications,
+    subtotal_price_set: order.subtotal_price_set,
+    total_price_set: order.total_price_set
+  }, null, 2));
+  
+  // Essayer différentes façons d'extraire les codes promo
+  const discountCodes = order.discount_codes || [];
+  const discountApplications = order.discount_applications || [];
+  
+  // Récupérer le code promo original depuis l'ID du discount
+  let usedCode: string | null = null;
+  
+  // Méthode 1: Essayer depuis discount_codes (format simple)
+  if (discountCodes.length > 0 && discountCodes[0].code) {
+    usedCode = discountCodes[0].code;
+    console.log(`📋 Code promo trouvé dans discount_codes: ${usedCode}`);
+  } 
+  // Méthode 2: Récupérer depuis discount_applications via GraphQL
+  else if (discountApplications.length > 0) {
+    const discountApp = discountApplications[0];
+    const discountId = discountApp.discount_id || discountApp.code || null;
+    
+    if (discountId) {
+      console.log(`🔍 Récupération du code original depuis l'ID: ${discountId}`);
+      try {
+        // Récupérer le code original depuis l'ID du discount
+        const discountQuery = `#graphql
+          query getDiscountCode($id: ID!) {
+            codeDiscountNode(id: $id) {
+              codeDiscount {
+                ... on DiscountCodeBasic {
+                  codes(first: 1) {
+                    edges {
+                      node {
+                        code
+                      }
+                    }
+                  }
+                }
+                ... on DiscountCodeBxgy {
+                  codes(first: 1) {
+                    edges {
+                      node {
+                        code
+                      }
+                    }
+                  }
+                }
+                ... on DiscountCodeFreeShipping {
+                  codes(first: 1) {
+                    edges {
+                      node {
+                        code
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        `;
+        
+        const discountResponse = await admin.graphql(discountQuery, { 
+          variables: { id: discountId } 
+        });
+        const discountData = await discountResponse.json() as any;
+        
+        if (discountData.data?.codeDiscountNode?.codeDiscount?.codes?.edges?.[0]?.node?.code) {
+          usedCode = discountData.data.codeDiscountNode.codeDiscount.codes.edges[0].node.code;
+          console.log(`✅ Code promo original récupéré: ${usedCode}`);
+        } else {
+          // Fallback: utiliser le code directement s'il est présent
+          usedCode = discountApp.code || discountApp.title || null;
+          console.log(`⚠️ Code original non trouvé, utilisation du code direct: ${usedCode}`);
+        }
+      } catch (error) {
+        console.error(`❌ Erreur lors de la récupération du code:`, error);
+        // Fallback: utiliser le code directement
+        usedCode = discountApp.code || discountApp.title || null;
+      }
+    } else {
+      // Fallback: utiliser le code directement
+      usedCode = discountApp.code || discountApp.title || null;
+    }
+  }
+  
+  console.log(`📋 Code promo final à utiliser: ${usedCode || "Aucun"}`);
 
   // On ne s'intéresse qu'aux commandes qui rapportent de l'argent (Scenario EARN)
   // Le Scenario BURN est géré automatiquement par Shopify (Checkout) !
-  if (discountCodes.length > 0) {
-    const usedCode = discountCodes[0].code;
-    // Utiliser le sous-total avant réduction pour calculer le CA généré réellement
-    const orderAmount = parseFloat(order.subtotal_price || order.total_price);
+  if (usedCode) {
+    
+    // Essayer différentes façons d'extraire le sous-total
+    let orderAmount = 0;
+    
+    // Log détaillé pour debug
+    console.log(`🔍 Extraction du sous-total - Valeurs disponibles:`, {
+      subtotal_price: order.subtotal_price,
+      subtotal_price_set: order.subtotal_price_set,
+      'subtotal_price_set.shop_money': order.subtotal_price_set?.shop_money,
+      'subtotal_price_set.shopMoney': order.subtotal_price_set?.shopMoney,
+      total_price: order.total_price,
+      total_price_set: order.total_price_set
+    });
+    
+    // Essayer toutes les variantes possibles
+    if (order.subtotal_price_set?.shop_money?.amount) {
+      orderAmount = parseFloat(String(order.subtotal_price_set.shop_money.amount));
+      console.log(`✅ Sous-total trouvé via subtotal_price_set.shop_money.amount: ${orderAmount}`);
+    } else if (order.subtotal_price_set?.shopMoney?.amount) {
+      orderAmount = parseFloat(String(order.subtotal_price_set.shopMoney.amount));
+      console.log(`✅ Sous-total trouvé via subtotal_price_set.shopMoney.amount: ${orderAmount}`);
+    } else if (order.subtotal_price) {
+      orderAmount = parseFloat(String(order.subtotal_price));
+      console.log(`✅ Sous-total trouvé via subtotal_price: ${orderAmount}`);
+    } else if (order.subtotal_price_set?.amount) {
+      orderAmount = parseFloat(String(order.subtotal_price_set.amount));
+      console.log(`✅ Sous-total trouvé via subtotal_price_set.amount: ${orderAmount}`);
+    } else if (order.total_price_set?.shop_money?.amount) {
+      orderAmount = parseFloat(String(order.total_price_set.shop_money.amount));
+      console.log(`⚠️ Utilisation du total_price_set.shop_money.amount (pas idéal): ${orderAmount}`);
+    } else if (order.total_price_set?.shopMoney?.amount) {
+      orderAmount = parseFloat(String(order.total_price_set.shopMoney.amount));
+      console.log(`⚠️ Utilisation du total_price_set.shopMoney.amount (pas idéal): ${orderAmount}`);
+    } else if (order.total_price) {
+      orderAmount = parseFloat(String(order.total_price));
+      console.log(`⚠️ Utilisation du total_price (pas idéal): ${orderAmount}`);
+    }
+    
+    if (orderAmount === 0) {
+      console.error(`❌ ERREUR: Impossible d'extraire le sous-total ! Structure complète:`, JSON.stringify(order, null, 2));
+    }
 
     console.log(`🔍 Recherche du pro avec le code: ${usedCode}`);
     console.log(`💰 Montant de la commande (sous-total): ${orderAmount}€`);
