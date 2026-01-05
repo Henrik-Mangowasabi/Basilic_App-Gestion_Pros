@@ -33,9 +33,25 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
               }
             }
             discountApplications(first: 10) {
-              code
-              value
-              valueType
+              edges {
+                node {
+                  ... on DiscountCodeApplication {
+                    code
+                    value
+                    valueType
+                  }
+                  ... on ScriptDiscountApplication {
+                    title
+                    value
+                    valueType
+                  }
+                  ... on AutomaticDiscountApplication {
+                    title
+                    value
+                    valueType
+                  }
+                }
+              }
             }
           }
         }
@@ -56,10 +72,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       orders = ordersData.data?.orders?.edges?.map((e: any) => {
         const node = e.node;
         // Convertir discountApplications en discountCodes pour compatibilité
-        const discountCodes = (node.discountApplications || []).map((da: any) => ({
-          code: da.code,
-          amount: da.value
-        }));
+        const discountCodes = (node.discountApplications?.edges || []).map((edge: any) => {
+          const da = edge.node;
+          // Extraire le code selon le type de discount
+          const code = da.code || da.title || "N/A";
+          return {
+            code: code,
+            amount: da.value || "0"
+          };
+        });
         
         return {
           id: node.id,

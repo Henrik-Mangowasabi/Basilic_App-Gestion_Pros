@@ -69,6 +69,68 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const newCount = currentCount + 1;
     const totalCreditShouldBe = Math.floor(newRevenue / 20) * 10;
     
+    // Calculer le montant à verser (Le Delta)
+    const amountToDeposit = totalCreditShouldBe - previousCreditEarned;
+    
+    // Récupérer le customer_id du metaobject
+    const customerIdField = metaobject.fields.find((f: any) => f.key === "customer_id");
+    const customerId = customerIdField?.value || null;
+    
+    let creditMessage = "";
+    
+    // Créditer le compte Store Credit si nécessaire
+    if (amountToDeposit > 0 && customerId) {
+      try {
+        // Trouver le compte Store Credit du client
+        const queryAccount = `#graphql
+          query getStoreCredit($id: ID!) {
+            customer(id: $id) {
+              storeCreditAccounts(first: 1) {
+                edges { node { id } }
+              }
+            }
+          }
+        `;
+        const rAccount = await admin.graphql(queryAccount, { variables: { id: customerId }});
+        const dAccount = await rAccount.json() as any;
+        const accountId = dAccount.data?.customer?.storeCreditAccounts?.edges?.[0]?.node?.id;
+        
+        if (accountId) {
+          // Faire le virement
+          const mutationCredit = `#graphql
+            mutation creditStore($id: ID!, $amount: MoneyInput!) {
+              storeCreditAccountCredit(id: $id, creditInput: {amount: $amount}) {
+                storeCreditAccountTransaction { amount { amount } }
+                userErrors { message }
+              }
+            }
+          `;
+          
+          const rCredit = await admin.graphql(mutationCredit, { 
+            variables: { 
+              id: accountId, 
+              amount: { amount: amountToDeposit, currencyCode: "EUR" } 
+            }
+          });
+          const dCredit = await rCredit.json() as any;
+          
+          if (dCredit.data?.storeCreditAccountCredit?.userErrors?.length > 0) {
+            creditMessage = ` | ⚠️ Erreur crédit: ${dCredit.data.storeCreditAccountCredit.userErrors[0].message}`;
+          } else {
+            creditMessage = ` | ✅ ${amountToDeposit}€ crédités sur le compte Store Credit`;
+          }
+        } else {
+          creditMessage = " | ⚠️ Aucun compte Store Credit trouvé pour ce client";
+        }
+      } catch (creditError) {
+        creditMessage = ` | ⚠️ Erreur lors du crédit: ${creditError instanceof Error ? creditError.message : String(creditError)}`;
+      }
+    } else if (amountToDeposit <= 0) {
+      creditMessage = " | ℹ️ Aucun crédit à verser (seuil non atteint)";
+    } else if (!customerId) {
+      creditMessage = " | ⚠️ Aucun customer_id trouvé dans le metaobject";
+    }
+    
     // Mettre à jour le metaobject
     const updateMutation = `#graphql
       mutation metaobjectUpdate($id: ID!, $metaobject: MetaobjectUpdateInput!) {
@@ -100,7 +162,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     
     return {
       success: true,
-      message: `Metaobject mis à jour avec succès ! CA: ${currentRevenue}€ → ${newRevenue}€ | Commandes: ${currentCount} → ${newCount}`
+      message: `Metaobject mis à jour avec succès ! CA: ${currentRevenue}€ → ${newRevenue}€ | Commandes: ${currentCount} → ${newCount}${creditMessage}`
     };
   } catch (error) {
     return { error: error instanceof Error ? error.message : String(error) };
