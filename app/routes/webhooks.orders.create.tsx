@@ -345,18 +345,34 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               if (accountId) {
                 // B. Faire le virement (Mutation Native)
                 const mutationCredit = `#graphql
-                  mutation creditStore($id: ID!, $amount: MoneyInput!) {
-                    storeCreditAccountCredit(id: $id, creditInput: {amount: $amount}) {
-                      storeCreditAccountTransaction { amount { amount } }
-                      userErrors { message }
+                  mutation creditStore($id: ID!, $creditAmount: MoneyInput!) {
+                    storeCreditAccountCredit(id: $id, creditAmount: $creditAmount) {
+                      storeCreditAccountTransaction { 
+                        amount { 
+                          amount 
+                          currencyCode 
+                        } 
+                      }
+                      userErrors { 
+                        field 
+                        message 
+                      }
                     }
                   }
                 `;
                 
+                const creditAmount = {
+                  amount: String(amountToDeposit),
+                  currencyCode: "EUR"
+                };
+                
+                console.log(`💳 Tentative de crédit de ${amountToDeposit}€ sur le compte ${accountId}`);
+                console.log(`💳 Paramètres:`, JSON.stringify({ id: accountId, creditAmount }, null, 2));
+                
                 const rCredit = await adminContext.graphql(mutationCredit, { 
                   variables: { 
                     id: accountId, 
-                    amount: { amount: amountToDeposit, currencyCode: "EUR" } 
+                    creditAmount: creditAmount
                   }
                 });
                 const dCredit = await rCredit.json() as any;
