@@ -35,7 +35,7 @@ model Session {
 }
 
 model Config {
-  id             Int    @id @default(1)
+  id             Int    @id @default(autoincrement())
   shop           String @unique
   threshold      Float  @default(500.0)
   creditAmount   Float  @default(10.0)
