@@ -1,5 +1,8 @@
 FROM node:20-slim
 
+# sqlite3 native module links against libsqlite3 — must be present at runtime
+RUN apt-get update && apt-get install -y --no-install-recommends libsqlite3-0 && rm -rf /var/lib/apt/lists/*
+
 EXPOSE 3000
 
 WORKDIR /app
