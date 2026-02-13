@@ -6,121 +6,18 @@ import {
   getMetaobjectEntries,
   checkMetaobjectStatus,
 } from "../lib/metaobject.server";
-import prisma from "../db.server";
+import { appConfig } from "../config.server";
 import { Pagination } from "../components/Pagination";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { admin } = await authenticate.admin(request);
+  const { admin, session } = await authenticate.admin(request);
+  const shop = session.shop;
 
   const status = await checkMetaobjectStatus(admin);
   if (!status.exists)
     return { clients: [] as any[], isInitialized: false, config: null };
 
-  // Charger la config (store unique, id=1)
-  let config = await prisma.config.findFirst();
-  if (!config) {
-    config = await prisma.config.create({
-      data: { id: 1, threshold: 500.0, creditAmount: 10.0 },
-    });
-  }
-
-  // SÉCURITÉ : On s'assure que entries est toujours un tableau
-  const result = await getMetaobjectEntries(admin);
-  const entries = result.entries || [];
-
-  if (entries.length === 0)
-    return { clients: [] as any[], isInitialized: true, config };
-
-  const customerIds = entries
-    .map((e: any) => e.customer_id)
-    .filter((id: string) => id && id.startsWith("gid://shopify/Customer/"));
-
-  const customerMap = new Map<string, any>();
-
-  if (customerIds.length > 0) {
-    const query = `#graphql
-      query getCustomersDetails($ids: [ID!]!) {
-        nodes(ids: $ids) {
-          ... on Customer {
-            id
-            firstName
-            lastName
-            email
-            storeCreditAccounts(first: 1) {
-              edges {
-                node {
-                  balance {
-                    amount
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    `;
-    try {
-      const response = await admin.graphql(query, {
-        variables: { ids: customerIds },
-      });
-      const data: any = await response.json();
-      const nodes = data.data?.nodes || [];
-      nodes.forEach((n: any) => {
-        if (n) customerMap.set(n.id, n);
-      });
-    } catch (e) {
-      console.error("Erreur Bulk Customers", e);
-    }
-  }
-
-  const combinedData = entries.map((entry: any) => {
-    const shopifyCustomer = customerMap.get(entry.customer_id);
-
-    const totalRevenue = entry.cache_revenue
-      ? parseFloat(entry.cache_revenue)
-      : 0;
-    const ordersCount = entry.cache_orders_count
-      ? parseInt(entry.cache_orders_count)
-      : 0;
-
-    // Utilisation de la CONFIG DYNAMIQUE
-    const currentThreshold = config?.threshold || 500.0;
-    const currentAmount = config?.creditAmount || 10.0;
-    const creditEarned =
-      Math.floor(totalRevenue / currentThreshold) * currentAmount;
-
-    // Récupération du solde REEL sur Shopify
-    const storeCreditAccount =
-      shopifyCustomer?.storeCreditAccounts?.edges?.[0]?.node;
-    const currentBalance = storeCreditAccount?.balance?.amount
-      ? parseFloat(storeCreditAccount.balance.amount)
-      : 0;
-
-    // Utilisé = Gagné - Ce qu'il reste sur le compte
-    const creditUsed = Math.max(0, creditEarned - currentBalance);
-    const creditRemaining = currentBalance;
-
-    return {
-      id: entry.customer_id || entry.id,
-      firstName:
-        shopifyCustomer?.firstName ||
-        entry.first_name ||
-        (entry.name ? entry.name.split(" ")[0] : "Inconnu"),
-      lastName:
-        shopifyCustomer?.lastName ||
-        entry.last_name ||
-        (entry.name ? entry.name.split(" ").slice(1).join(" ") : ""),
-      email: shopifyCustomer?.email || entry.email,
-      linkedCode: entry.code,
-      ordersCount: ordersCount,
-      totalRevenue: totalRevenue,
-      creditEarned,
-      creditUsed,
-      creditRemaining,
-      profession: entry.profession || "-",
-      adresse: entry.adresse || "-",
-    };
-  });
+  const config = appConfig;);
 
   return { clients: combinedData, isInitialized: true, config };
 };
