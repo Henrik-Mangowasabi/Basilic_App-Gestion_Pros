@@ -560,7 +560,7 @@ export default function ClientsPage() {
                             backgroundColor: bgStd,
                           }}
                         >
-                          {client.id && client.id.startsWith("gid://") ? (
+                          {client.id && client.id.startsWith("gid://shopify/Customer/") ? (
                             <a
                               href={`shopify:admin/customers/${extractId(client.id)}`}
                               target="_blank"
