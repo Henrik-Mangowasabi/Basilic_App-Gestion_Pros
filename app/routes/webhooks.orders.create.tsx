@@ -1,6 +1,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { updateCustomerProMetafields } from "../lib/customer.server";
 
 // Loader pour gérer les requêtes GET (tests de connectivité)
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -23,10 +24,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   try {
     const { admin, payload, shop, session, topic } = await authenticate.webhook(request);
 
-    // Charger la configuration pour cette boutique
-    let config = await prisma.config.findUnique({ where: { shop } });
+    // Charger la configuration (store unique, id=1)
+    let config = await prisma.config.findFirst();
     if (!config) {
-      console.warn(`⚠️ Config non trouvée pour ${shop}, utilisation des valeurs par défaut.`);
+      console.warn(`⚠️ Config non trouvée, utilisation des valeurs par défaut.`);
       config = { threshold: 500.0, creditAmount: 10.0 } as any;
     }
     console.log(`⚙️ Config utilisée - Seuil: ${config.threshold}€, Crédit: ${config.creditAmount}€`);
@@ -472,8 +473,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         console.log(`   - cache_revenue: ${currentRevenue} → ${newRevenue}`);
         console.log(`   - cache_orders_count: ${currentCount} → ${newCount}`);
         console.log(`   - cache_credit_earned: ${previousCreditEarned} → ${totalCreditShouldBe}`);
+
+        // Mise à jour dynamique du metafield ca_genere sur la fiche client
+        if (customerIdValue) {
+          try {
+            await updateCustomerProMetafields(adminContext, customerIdValue, {
+              ca_genere: newRevenue,
+            });
+            console.log(`✅ Metafield ca_genere mis à jour : ${newRevenue}€`);
+          } catch (mfError) {
+            console.warn("⚠️ Echec mise à jour ca_genere (non bloquant):", mfError);
+          }
+        }
       }
-    } catch (e) { 
+    } catch (e) {
       console.error("❌ Erreur Webhook:", e);
       if (e instanceof Error) {
         console.error("❌ Message d'erreur:", e.message);

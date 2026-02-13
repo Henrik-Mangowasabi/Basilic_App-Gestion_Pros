@@ -10,6 +10,7 @@ import {
   ensureCustomerPro,
   removeCustomerProTag,
   updateCustomerInShopify,
+  updateCustomerProMetafields,
 } from "./customer.server";
 
 const METAOBJECT_TYPE = "mm_pro_de_sante";
@@ -55,8 +56,14 @@ export async function createMetaobject(admin: AdminApiContext) {
       required: true,
     },
     {
-      name: "Name",
-      key: "name",
+      name: "Prénom",
+      key: "first_name",
+      type: "single_line_text_field",
+      required: true,
+    },
+    {
+      name: "Nom",
+      key: "last_name",
       type: "single_line_text_field",
       required: true,
     },
@@ -183,6 +190,14 @@ export async function getMetaobjectEntries(admin: AdminApiContext) {
             else entry[f.key] = f.value;
           });
           if (entry.status === undefined) entry.status = true;
+          // Rétrocompatibilité : si l'ancienne structure a "name" mais pas first_name/last_name
+          if (!entry.first_name && !entry.last_name && entry.name) {
+            const parts = (entry.name as string).trim().split(" ");
+            entry.first_name = parts[0] || "";
+            entry.last_name = parts.slice(1).join(" ") || "";
+          }
+          // Nom complet calculé pour les pages secondaires
+          entry.name = [entry.first_name, entry.last_name].filter(Boolean).join(" ") || entry.name || "";
           return entry;
         })
         .filter(Boolean) || [];
@@ -197,7 +212,8 @@ export async function createMetaobjectEntry(
   admin: AdminApiContext,
   fields: any,
 ) {
-  const discountName = `Code promo Pro Sante - ${fields.name}`;
+  const fullName = `${fields.first_name || ""} ${fields.last_name || ""}`.trim();
+  const discountName = `Code promo Pro Sante - ${fullName}`;
   let discountIdCreated: string | null = null;
   let customerIdToSave: string = "";
 
@@ -224,7 +240,8 @@ export async function createMetaobjectEntry(
     const clientResult = await ensureCustomerPro(
       admin,
       fields.email,
-      fields.name,
+      fields.first_name || "",
+      fields.last_name || "",
       fields.profession,
       fields.adresse,
     );
@@ -238,7 +255,8 @@ export async function createMetaobjectEntry(
     // 3. CRÉATION MÉTAOBJET
     const fieldsInput = [
       { key: "identification", value: String(fields.identification) },
-      { key: "name", value: String(fields.name) },
+      { key: "first_name", value: String(fields.first_name || "") },
+      { key: "last_name", value: String(fields.last_name || "") },
       { key: "email", value: String(fields.email) },
       { key: "code", value: String(fields.code) },
       { key: "montant", value: String(fields.montant) },
@@ -264,6 +282,13 @@ export async function createMetaobjectEntry(
 
     if (data.data?.metaobjectCreate?.userErrors?.length > 0) {
       throw new Error(data.data.metaobjectCreate.userErrors[0].message);
+    }
+
+    // 4. Mise à jour metafield code_promo sur la fiche client
+    if (customerIdToSave) {
+      await updateCustomerProMetafields(admin, customerIdToSave, {
+        code_promo: String(fields.code),
+      });
     }
 
     return { success: true };
@@ -311,7 +336,9 @@ export async function updateMetaobjectEntry(
     };
   }
 
-  const mergedName = fields.name || oldData.name;
+  const mergedFirstName = fields.first_name !== undefined ? fields.first_name : (oldData.first_name || "");
+  const mergedLastName = fields.last_name !== undefined ? fields.last_name : (oldData.last_name || "");
+  const mergedFullName = `${mergedFirstName} ${mergedLastName}`.trim();
   const mergedCode = fields.code || oldData.code;
   const mergedMontant =
     fields.montant !== undefined
@@ -323,8 +350,8 @@ export async function updateMetaobjectEntry(
 
   // 2. Mise à jour du Code Promo
   if (oldData.discount_id) {
-    if (fields.name || fields.code || fields.montant || fields.type) {
-      const discountName = `Code promo Pro Sante - ${mergedName}`;
+    if (fields.first_name !== undefined || fields.last_name !== undefined || fields.code || fields.montant || fields.type) {
+      const discountName = `Code promo Pro Sante - ${mergedFullName}`;
       await updateShopifyDiscount(admin, oldData.discount_id, {
         code: mergedCode,
         montant: mergedMontant,
@@ -346,7 +373,8 @@ export async function updateMetaobjectEntry(
       fields.email &&
       fields.email.trim().toLowerCase() !==
         (oldData.email || "").trim().toLowerCase();
-    const hasNameChanged = fields.name && fields.name !== oldData.name;
+    const hasFirstNameChanged = fields.first_name !== undefined && fields.first_name !== oldData.first_name;
+    const hasLastNameChanged = fields.last_name !== undefined && fields.last_name !== oldData.last_name;
     const hasProfessionChanged =
       fields.profession !== undefined &&
       fields.profession !== oldData.profession;
@@ -355,17 +383,18 @@ export async function updateMetaobjectEntry(
 
     if (
       hasEmailChanged ||
-      hasNameChanged ||
+      hasFirstNameChanged ||
+      hasLastNameChanged ||
       hasProfessionChanged ||
       hasAdresseChanged
     ) {
       console.log(
-        `👤 Changement infos client détecté (${[hasEmailChanged && "Email", hasNameChanged && "Nom", hasProfessionChanged && "Profession", hasAdresseChanged && "Adresse"].filter(Boolean).join(", ")}). Mise à jour Shopify...`,
+        `👤 Changement infos client détecté (${[hasEmailChanged && "Email", (hasFirstNameChanged || hasLastNameChanged) && "Nom", hasProfessionChanged && "Profession", hasAdresseChanged && "Adresse"].filter(Boolean).join(", ")}). Mise à jour Shopify...`,
       );
 
-      // On utilise l'email fourni ou l'ancien si pas changé
       const emailToUse = fields.email || oldData.email;
-      const nameToUse = fields.name || oldData.name;
+      const firstNameToUse = fields.first_name !== undefined ? fields.first_name : (oldData.first_name || "");
+      const lastNameToUse = fields.last_name !== undefined ? fields.last_name : (oldData.last_name || "");
       const professionToUse =
         fields.profession !== undefined
           ? fields.profession
@@ -377,7 +406,8 @@ export async function updateMetaobjectEntry(
         admin,
         oldData.customer_id,
         hasEmailChanged ? emailToUse : undefined,
-        hasNameChanged ? nameToUse : undefined,
+        (hasFirstNameChanged || hasLastNameChanged) ? firstNameToUse : undefined,
+        (hasFirstNameChanged || hasLastNameChanged) ? lastNameToUse : undefined,
         professionToUse,
         adresseToUse,
       );
@@ -397,8 +427,10 @@ export async function updateMetaobjectEntry(
       key: "identification",
       value: String(fields.identification),
     });
-  if (fields.name)
-    fieldsInput.push({ key: "name", value: String(fields.name) });
+  if (fields.first_name !== undefined)
+    fieldsInput.push({ key: "first_name", value: String(fields.first_name) });
+  if (fields.last_name !== undefined)
+    fieldsInput.push({ key: "last_name", value: String(fields.last_name) });
   if (fields.email)
     fieldsInput.push({ key: "email", value: String(fields.email) });
   if (fields.code)
@@ -426,6 +458,15 @@ export async function updateMetaobjectEntry(
         success: false,
         error: d.data.metaobjectUpdate.userErrors[0].message,
       };
+
+    // Mise à jour metafield code_promo si le code a changé
+    const codeChanged = fields.code && fields.code !== oldData.code;
+    if (codeChanged && oldData.customer_id) {
+      await updateCustomerProMetafields(admin, oldData.customer_id, {
+        code_promo: String(mergedCode),
+      });
+    }
+
     return { success: true };
   } catch (e) {
     return { success: false, error: String(e) };
