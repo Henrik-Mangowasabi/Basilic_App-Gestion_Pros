@@ -110,8 +110,15 @@ export async function ensureCustomerPro(admin: AdminApiContext, rawEmail: string
       const r = await admin.graphql(createMutation, { variables });
       const d = await r.json() as any;
       if (d.data?.customerCreate?.userErrors?.length > 0) {
+          const userError = d.data.customerCreate.userErrors[0];
+          const msg = userError.message || "";
+          // Si email déjà pris, le client existe mais on ne peut pas le retrouver (Protected Data)
+          if (msg.toLowerCase().includes("taken") || msg.toLowerCase().includes("already") || msg.toLowerCase().includes("email")) {
+            console.warn("[CUSTOMER] Email déjà pris — client existe mais inaccessible (Protected Data). customer_id non sauvegardé.");
+            return { success: true, customerId: null };
+          }
           console.error("[CUSTOMER] Erreur création:", d.data.customerCreate.userErrors);
-          return { success: false, error: d.data.customerCreate.userErrors[0].message };
+          return { success: false, error: userError.message };
       }
       customerId = d.data?.customerCreate?.customer?.id;
       console.log(`[CUSTOMER] Créé avec succès : ${customerId}`);
