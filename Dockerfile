@@ -1,5 +1,4 @@
 FROM node:20-alpine
-RUN apk add --no-cache openssl
 
 EXPOSE 3000
 
@@ -14,7 +13,6 @@ RUN npm ci && npm cache clean --force
 COPY . .
 
 # Faire le build (nécessite les devDependencies)
-RUN npx prisma generate
 RUN npm run build
 
 # Supprimer les devDependencies après le build pour réduire la taille
