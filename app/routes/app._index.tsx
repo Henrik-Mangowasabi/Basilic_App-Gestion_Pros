@@ -29,19 +29,21 @@ import * as XLSX from "xlsx";
 
 // --- LOADER ---
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { admin, session } = await authenticate.admin(request);
+  const { admin } = await authenticate.admin(request);
   const status = await checkMetaobjectStatus(admin);
 
-  // Charger la config (seuil de crédit) ou la créer si inexistante
+  // Charger la config (seuil de crédit) ou la créer si inexistante (store unique, id=1)
   const config = await prisma.config.upsert({
-    where: { shop: session.shop },
+    where: { id: 1 },
     update: {},
-    create: { shop: session.shop, threshold: 500.0, creditAmount: 10.0 },
+    create: { id: 1, threshold: 500.0, creditAmount: 10.0 },
   });
 
   let entries: Array<{
     id: string;
     identification?: string;
+    first_name?: string;
+    last_name?: string;
     name?: string;
     email?: string;
     code?: string;
@@ -128,7 +130,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (actionType === "create_entry") {
     const identification =
       (formData.get("identification") as string)?.trim() || "";
-    const name = (formData.get("name") as string)?.trim() || "";
+    const first_name = (formData.get("first_name") as string)?.trim() || "";
+    const last_name = (formData.get("last_name") as string)?.trim() || "";
     const email = (formData.get("email") as string)?.trim() || "";
     const code = (formData.get("code") as string)?.trim() || "";
     const montantStr = (formData.get("montant") as string)?.trim() || "";
@@ -143,7 +146,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     const result = await createMetaobjectEntry(admin, {
       identification,
-      name,
+      first_name,
+      last_name,
       email,
       code,
       montant,
@@ -163,12 +167,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (actionType === "update_config") {
     const threshold = parseFloat(formData.get("threshold") as string);
     const creditAmount = parseFloat(formData.get("creditAmount") as string);
-    const { session } = await authenticate.admin(request);
 
     await prisma.config.upsert({
-      where: { shop: session.shop },
+      where: { id: 1 },
       update: { threshold, creditAmount },
-      create: { shop: session.shop, threshold, creditAmount },
+      create: { id: 1, threshold, creditAmount },
     });
     return { success: "config_updated" };
   }
@@ -177,7 +180,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const id = formData.get("id") as string;
     const identification =
       (formData.get("identification") as string)?.trim() || "";
-    const name = (formData.get("name") as string)?.trim() || "";
+    const first_name = (formData.get("first_name") as string)?.trim() || "";
+    const last_name = (formData.get("last_name") as string)?.trim() || "";
     const email = (formData.get("email") as string)?.trim() || "";
     const code = (formData.get("code") as string)?.trim() || "";
     const montantStr = (formData.get("montant") as string)?.trim() || "";
@@ -189,7 +193,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     const result = await updateMetaobjectEntry(admin, id, {
       identification,
-      name,
+      first_name,
+      last_name,
       email,
       code,
       montant: parseFloat(montantStr),
@@ -289,17 +294,24 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               "",
           ),
         );
-        const name = cleanInput(
-          String(
-            keys["prénom nom"] ||
-              keys["prenom nom"] ||
-              keys.nom ||
-              keys.name ||
-              keys.prénom ||
-              keys.prenom ||
-              "",
-          ),
+        // Support colonnes séparées Prénom / Nom, et fallback colonne combinée
+        const combinedName = cleanInput(
+          String(keys["prénom nom"] || keys["prenom nom"] || ""),
         );
+        let first_name = cleanInput(
+          String(keys.prénom || keys.prenom || keys["first name"] || keys.firstname || ""),
+        );
+        let last_name = cleanInput(
+          String(keys.nom || keys.name || keys["last name"] || keys.lastname || ""),
+        );
+        // Si colonnes séparées vides mais colonne combinée présente, on découpe
+        if (!first_name && !last_name && combinedName) {
+          const parts = combinedName.split(" ");
+          first_name = parts[0] || "";
+          last_name = parts.slice(1).join(" ") || "";
+        }
+        const displayName = `${first_name} ${last_name}`.trim() || "Sans nom";
+
         const email = String(
           keys.email || keys.mail || keys.courriel || "",
         ).trim();
@@ -318,18 +330,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const adresse = cleanInput(
           String(keys.adresse || keys.address || keys.ville || ""),
         );
-        // On prend ce qu'on a
 
         // Vérif données minimales
         if (!ref) {
-          // On ignore les lignes vides silencieusement
-          if (!name && !email && !code) continue;
-          errors.push(`Ligne ignorée (Ref manquante) : ${name || "Sans nom"}`);
+          if (!first_name && !last_name && !email && !code) continue;
+          errors.push(`Ligne ignorée (Ref manquante) : ${displayName}`);
           continue;
         }
-        if (!name || !email || !code) {
+        if ((!first_name && !last_name) || !email || !code) {
           errors.push(
-            `Données incomplètes pour Ref ${ref} : ${!name ? "Nom manquant" : ""} ${!email ? "Email manquant" : ""} ${!code ? "Code manquant" : ""}`,
+            `Données incomplètes pour Ref ${ref} : ${(!first_name && !last_name) ? "Nom manquant" : ""} ${!email ? "Email manquant" : ""} ${!code ? "Code manquant" : ""}`,
           );
           continue;
         }
@@ -337,12 +347,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         // Vérification doublons stricte (Ref ou Code)
         if (existingCodes.has(code.toLowerCase())) {
           skipped++;
-          duplicates.push(`${name} (Code existant: ${code})`);
+          duplicates.push(`${displayName} (Code existant: ${code})`);
           continue;
         }
         if (existingRefs.has(ref.toLowerCase())) {
           skipped++;
-          duplicates.push(`${name} (Ref existante: ${ref})`);
+          duplicates.push(`${displayName} (Ref existante: ${ref})`);
           continue;
         }
 
@@ -353,12 +363,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             ? "€"
             : "%";
 
-        console.log(`➕ Import en cours : ${name} (${code})`);
+        console.log(`➕ Import en cours : ${displayName} (${code})`);
 
         // Appel de création
         const result = await createMetaobjectEntry(admin, {
           identification: ref,
-          name,
+          first_name,
+          last_name,
           email,
           code,
           montant,
@@ -393,17 +404,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   if (actionType === "api_create_partner") {
     const identification = String(formData.get("identification"));
-    const name = String(formData.get("name"));
+    const first_name = String(formData.get("first_name") || "");
+    const last_name = String(formData.get("last_name") || "");
     const email = String(formData.get("email"));
     const code = String(formData.get("code"));
     const montant = parseFloat(String(formData.get("montant")));
     const type = String(formData.get("type"));
-    const profession = String(formData.get("profession"));
-    const adresse = String(formData.get("adresse"));
+    const profession = String(formData.get("profession") || "");
+    const adresse = String(formData.get("adresse") || "");
 
     const result = await createMetaobjectEntry(admin, {
       identification,
-      name,
+      first_name,
+      last_name,
       email,
       code,
       montant,
@@ -575,7 +588,8 @@ function EntryRow({
 
   const getInitialFormData = () => ({
     identification: entry.identification || "",
-    name: entry.name || "",
+    first_name: entry.first_name || "",
+    last_name: entry.last_name || "",
     email: entry.email || "",
     code: entry.code || "",
     montant: entry.montant !== undefined ? String(entry.montant) : "",
@@ -647,12 +661,26 @@ function EntryRow({
             <input
               disabled={isBusy}
               type="text"
-              value={formData.name}
+              value={formData.first_name}
               onChange={(e) =>
-                setFormData({ ...formData, name: e.target.value })
+                setFormData({ ...formData, first_name: e.target.value })
               }
               onKeyDown={handleKeyDown}
               style={styles.input}
+              placeholder="Prénom"
+            />
+          </td>
+          <td style={{ ...styles.cell, backgroundColor: bgStandard }}>
+            <input
+              disabled={isBusy}
+              type="text"
+              value={formData.last_name}
+              onChange={(e) =>
+                setFormData({ ...formData, last_name: e.target.value })
+              }
+              onKeyDown={handleKeyDown}
+              style={styles.input}
+              placeholder="Nom"
             />
           </td>
           <td style={{ ...styles.cell, backgroundColor: bgStandard }}>
@@ -806,7 +834,17 @@ function EntryRow({
               color: "#333",
             }}
           >
-            {entry.name}
+            {entry.first_name}
+          </td>
+          <td
+            style={{
+              ...styles.cell,
+              backgroundColor: bgStandard,
+              fontWeight: "600",
+              color: "#333",
+            }}
+          >
+            {entry.last_name}
           </td>
           <td style={{ ...styles.cell, backgroundColor: bgStandard }}>
             {entry.email}
@@ -930,7 +968,8 @@ function EntryRow({
 function NewEntryForm() {
   const [formData, setFormData] = useState({
     identification: "",
-    name: "",
+    first_name: "",
+    last_name: "",
     email: "",
     code: "",
     montant: "",
@@ -948,7 +987,8 @@ function NewEntryForm() {
     if (searchParams.get("success") === "entry_created") {
       setFormData({
         identification: "",
-        name: "",
+        first_name: "",
+        last_name: "",
         email: "",
         code: "",
         montant: "",
@@ -999,11 +1039,23 @@ function NewEntryForm() {
         <input
           disabled={isCreating}
           type="text"
-          name="name"
-          placeholder="Prénom NOM *"
+          name="first_name"
+          placeholder="Prénom *"
           required
-          value={formData.name}
-          onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+          value={formData.first_name}
+          onChange={(e) => setFormData({ ...formData, first_name: e.target.value })}
+          style={styles.input}
+        />
+      </td>
+      <td style={styles.cell}>
+        <input
+          disabled={isCreating}
+          type="text"
+          name="last_name"
+          placeholder="Nom *"
+          required
+          value={formData.last_name}
+          onChange={(e) => setFormData({ ...formData, last_name: e.target.value })}
           style={styles.input}
         />
       </td>
@@ -1420,17 +1472,23 @@ function ImportForm({ existingEntries }: { existingEntries: any[] }) {
             "",
         ),
       );
-      const name = cleanInput(
-        String(
-          keys["prénom nom"] ||
-            keys["prenom nom"] ||
-            keys.nom ||
-            keys.name ||
-            keys.prénom ||
-            keys.prenom ||
-            "",
-        ),
+      // Support colonnes séparées Prénom / Nom, et fallback colonne combinée
+      const combinedName = cleanInput(
+        String(keys["prénom nom"] || keys["prenom nom"] || ""),
       );
+      let first_name = cleanInput(
+        String(keys.prénom || keys.prenom || keys["first name"] || keys.firstname || ""),
+      );
+      let last_name = cleanInput(
+        String(keys.nom || keys.name || keys["last name"] || keys.lastname || ""),
+      );
+      if (!first_name && !last_name && combinedName) {
+        const parts = combinedName.split(" ");
+        first_name = parts[0] || "";
+        last_name = parts.slice(1).join(" ") || "";
+      }
+      const displayName = `${first_name} ${last_name}`.trim() || "Sans nom";
+
       const email = String(
         keys.email || keys.mail || keys.courriel || "",
       ).trim();
@@ -1455,24 +1513,25 @@ function ImportForm({ existingEntries }: { existingEntries: any[] }) {
 
       // Validations de base
       if (!ref) {
-        if (name || email || code)
-          errors.push(`Ligne ignorée (Ref manquante) : ${name}`);
+        if (first_name || last_name || email || code)
+          errors.push(`Ligne ignorée (Ref manquante) : ${displayName}`);
         continue;
       }
       if (existingCodes.has(code.toLowerCase())) {
         skipped++;
-        duplicates.push(`${name} (Code existant: ${code})`);
+        duplicates.push(`${displayName} (Code existant: ${code})`);
         continue;
       }
       if (existingRefs.has(ref.toLowerCase())) {
         skipped++;
-        duplicates.push(`${name} (Ref existante: ${ref})`);
+        duplicates.push(`${displayName} (Ref existante: ${ref})`);
         continue;
       }
 
       itemsToProcess.push({
         identification: ref,
-        name,
+        first_name,
+        last_name,
         email,
         code,
         montant,
@@ -1518,11 +1577,13 @@ function ImportForm({ existingEntries }: { existingEntries: any[] }) {
             let niceError = String(json.error);
             if (niceError.includes("single line text string"))
               niceError = "Format invalide (Sauts de ligne).";
-            errors.push(`Erreur pour ${item.name} : ${niceError}`);
+            const itemName = `${(item as any).first_name || ""} ${(item as any).last_name || ""}`.trim() || item.identification;
+            errors.push(`Erreur pour ${itemName} : ${niceError}`);
             return { success: false, item, error: niceError };
           }
         } catch (e) {
-          errors.push(`Erreur réseau pour ${item.name} : ${String(e)}`);
+          const itemName = `${(item as any).first_name || ""} ${(item as any).last_name || ""}`.trim() || item.identification;
+          errors.push(`Erreur réseau pour ${itemName} : ${String(e)}`);
           return { success: false, item, error: String(e) };
         }
       });
@@ -2054,7 +2115,8 @@ export default function Index() {
                   >
                     <th style={{ ...thStyle, width: "80px" }}>ID</th>
                     <th style={thStyle}>Ref Interne</th>
-                    <th style={thStyle}>Prénom NOM</th>
+                    <th style={thStyle}>Prénom</th>
+                    <th style={thStyle}>Nom</th>
                     <th style={thStyle}>Email</th>
                     <th style={thStyle}>Profession</th>
                     <th style={thStyle}>Adresse</th>

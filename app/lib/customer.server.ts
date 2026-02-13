@@ -7,14 +7,6 @@ function cleanEmail(email: string) {
   return email ? email.trim().toLowerCase() : "";
 }
 
-// Fonction utilitaire pour découper le nom
-function splitName(fullName: string) {
-  const parts = fullName.trim().split(" ");
-  const firstName = parts[0];
-  const lastName = parts.slice(1).join(" ") || firstName; 
-  return { firstName, lastName };
-}
-
 // Cette fonction n'est plus utilisée par la nouvelle version optimisée, 
 // mais on la garde pour éviter les erreurs d'import si elle est appelée ailleurs.
 export async function getProSanteCustomers(admin: AdminApiContext) {
@@ -33,7 +25,9 @@ export async function createCustomerMetafieldDefinitions(admin: AdminApiContext)
 
   const defs = [
     { namespace: "custom", key: "profession", name: "Profession", type: "single_line_text_field", ownerType: "CUSTOMER" },
-    { namespace: "custom", key: "adresse", name: "Adresse postale", type: "single_line_text_field", ownerType: "CUSTOMER" }
+    { namespace: "custom", key: "adresse", name: "Adresse postale", type: "single_line_text_field", ownerType: "CUSTOMER" },
+    { namespace: "custom", key: "code_promo", name: "Code promo partenaire", type: "single_line_text_field", ownerType: "CUSTOMER" },
+    { namespace: "custom", key: "ca_genere", name: "CA généré (partenaire)", type: "number_decimal", ownerType: "CUSTOMER" },
   ];
 
   for (const def of defs) {
@@ -48,10 +42,37 @@ export async function createCustomerMetafieldDefinitions(admin: AdminApiContext)
   }
 }
 
-export async function ensureCustomerPro(admin: AdminApiContext, rawEmail: string, name: string, profession?: string, adresse?: string) {
+export async function updateCustomerProMetafields(
+  admin: AdminApiContext,
+  customerId: string,
+  updates: { code_promo?: string; ca_genere?: number },
+) {
+  const metafields: any[] = [];
+  if (updates.code_promo !== undefined)
+    metafields.push({ namespace: "custom", key: "code_promo", value: updates.code_promo, type: "single_line_text_field" });
+  if (updates.ca_genere !== undefined)
+    metafields.push({ namespace: "custom", key: "ca_genere", value: String(updates.ca_genere), type: "number_decimal" });
+
+  if (metafields.length === 0) return { success: true };
+
+  const mutation = `mutation customerUpdate($input: CustomerInput!) { customerUpdate(input: $input) { userErrors { field message } } }`;
+  try {
+    const r = await admin.graphql(mutation, { variables: { input: { id: customerId, metafields } } });
+    const d = await r.json() as any;
+    if (d.data?.customerUpdate?.userErrors?.length > 0) {
+      console.error("[MF PRO] Erreur update metafields:", d.data.customerUpdate.userErrors);
+      return { success: false, error: d.data.customerUpdate.userErrors[0].message };
+    }
+    return { success: true };
+  } catch (e) {
+    console.error("[MF PRO] Crash update metafields:", e);
+    return { success: false, error: String(e) };
+  }
+}
+
+export async function ensureCustomerPro(admin: AdminApiContext, rawEmail: string, firstName: string, lastName: string, profession?: string, adresse?: string) {
   const email = cleanEmail(rawEmail);
-  const { firstName, lastName } = splitName(name);
-  
+
   console.log(`[CUSTOMER] Traitement pour : ${email} (Nom: ${firstName} ${lastName})`);
 
   // 1. Recherche Client Existant
@@ -100,8 +121,7 @@ export async function ensureCustomerPro(admin: AdminApiContext, rawEmail: string
   // 3. Mise à jour complète (Nom, Email, Profession, Adresse physique)
   if (customerId) {
       console.log(`[CUSTOMER] Synchronisation finale des données pour ${customerId}...`);
-      // On ne passe l'email que s'il est différent ou si on veut forcer la synchro
-      await updateCustomerInShopify(admin, customerId, email, name, profession, adresse);
+      await updateCustomerInShopify(admin, customerId, email, firstName, lastName, profession, adresse);
       
       // Ajout du Tag si manquant
       if (!currentTags.includes(PRO_TAG)) {
@@ -132,18 +152,15 @@ export async function removeCustomerProTag(admin: AdminApiContext, idOrEmail: st
     return { success: true };
 }
 
-export async function updateCustomerInShopify(admin: AdminApiContext, customerId: string, email?: string, name?: string, profession?: string, adresse?: string) {
+export async function updateCustomerInShopify(admin: AdminApiContext, customerId: string, email?: string, firstName?: string, lastName?: string, profession?: string, adresse?: string) {
   const input: any = { id: customerId };
-  
+
   if (email) {
     input.email = email.trim().toLowerCase();
   }
 
-  if (name) {
-    const { firstName, lastName } = splitName(name);
-    input.firstName = firstName;
-    input.lastName = lastName;
-  }
+  if (firstName !== undefined) input.firstName = firstName;
+  if (lastName !== undefined) input.lastName = lastName;
 
   // METAFIELDS
   const metafields = [];
@@ -199,12 +216,10 @@ export async function updateCustomerInShopify(admin: AdminApiContext, customerId
               }
           }
 
-          const { firstName, lastName } = splitName(name || "");
-
           // On force le vidage des champs "test" ou parasites
           const addressInput: any = {
               address1: address1,
-              address2: "", 
+              address2: "",
               company: "",
               city: city,
               zip: zip,
@@ -212,8 +227,8 @@ export async function updateCustomerInShopify(admin: AdminApiContext, customerId
               provinceCode: "",
               country: "France",
               countryCode: "FR",
-              firstName: firstName,
-              lastName: lastName
+              firstName: firstName || "",
+              lastName: lastName || "",
           };
 
           if (defaultAddressId) {

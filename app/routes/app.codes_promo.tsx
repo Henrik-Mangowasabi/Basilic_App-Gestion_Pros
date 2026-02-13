@@ -64,7 +64,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     ...entry,
     // Si on a trouvé le client Shopify, on affiche son Prénom/Nom.
     // Sinon on garde le nom interne du métaobjet (fallback).
-    displayName: nameMap.get(entry.customer_id) || entry.name,
+    displayName: nameMap.get(entry.customer_id) || [entry.first_name, entry.last_name].filter(Boolean).join(" ") || entry.name,
   }));
 
   return { entries: enrichedEntries, isInitialized: true };
@@ -632,7 +632,7 @@ export default function CodesPromoPage() {
                             color: "#333",
                           }}
                         >
-                          {entry.displayName || entry.name}
+                          {entry.displayName || [entry.first_name, entry.last_name].filter(Boolean).join(" ") || entry.name}
                         </td>
                         <td
                           style={{
@@ -675,7 +675,7 @@ export default function CodesPromoPage() {
                           }}
                         >
                           Code promo Pro Sante -{" "}
-                          {entry.displayName || entry.name}
+                          {entry.displayName || [entry.first_name, entry.last_name].filter(Boolean).join(" ") || entry.name}
                         </td>
 
                         {/* Code Promo */}

@@ -10,8 +10,7 @@ import prisma from "../db.server";
 import { Pagination } from "../components/Pagination";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { admin, session } = await authenticate.admin(request);
-  const shop = session.shop;
+  const { admin } = await authenticate.admin(request);
   const url = new URL(request.url);
   const startDateStr = url.searchParams.get("startDate");
   const endDateStr = url.searchParams.get("endDate");
@@ -26,11 +25,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       filters: { startDate: "", endDate: "" },
     };
 
-  // Charger la config
-  let config = await prisma.config.findUnique({ where: { shop } });
+  // Charger la config (store unique, id=1)
+  let config = await prisma.config.findFirst();
   if (!config) {
     config = await prisma.config.create({
-      data: { shop, threshold: 500.0, creditAmount: 10.0 },
+      data: { id: 1, threshold: 500.0, creditAmount: 10.0 },
     });
   }
 
@@ -122,7 +121,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           };
           return {
             id: entry.id,
-            name: entry.name || "Sans nom",
+            name: [entry.first_name, entry.last_name].filter(Boolean).join(" ") || entry.name || "Sans nom",
             code: entry.code || "-",
             revenue: periodData.revenue,
             ordersCount: periodData.count,

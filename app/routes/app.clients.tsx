@@ -10,18 +10,17 @@ import prisma from "../db.server";
 import { Pagination } from "../components/Pagination";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { admin, session } = await authenticate.admin(request);
-  const shop = session.shop;
+  const { admin } = await authenticate.admin(request);
 
   const status = await checkMetaobjectStatus(admin);
   if (!status.exists)
     return { clients: [] as any[], isInitialized: false, config: null };
 
-  // Charger la config
-  let config = await prisma.config.findUnique({ where: { shop } });
+  // Charger la config (store unique, id=1)
+  let config = await prisma.config.findFirst();
   if (!config) {
     config = await prisma.config.create({
-      data: { shop, threshold: 500.0, creditAmount: 10.0 },
+      data: { id: 1, threshold: 500.0, creditAmount: 10.0 },
     });
   }
 
@@ -105,9 +104,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       id: entry.customer_id || entry.id,
       firstName:
         shopifyCustomer?.firstName ||
+        entry.first_name ||
         (entry.name ? entry.name.split(" ")[0] : "Inconnu"),
       lastName:
         shopifyCustomer?.lastName ||
+        entry.last_name ||
         (entry.name ? entry.name.split(" ").slice(1).join(" ") : ""),
       email: shopifyCustomer?.email || entry.email,
       linkedCode: entry.code,

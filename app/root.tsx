@@ -1,4 +1,6 @@
 import { Links, Meta, Outlet, Scripts, ScrollRestoration } from "react-router";
+import "./styles/ui-kit.css";
+import "./styles/basilic-ui.css";
 
 export default function App() {
   return (
