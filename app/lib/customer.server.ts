@@ -118,16 +118,24 @@ export async function ensureCustomerPro(admin: AdminApiContext, rawEmail: string
     } catch (e) { return { success: false, error: String(e) }; }
   } 
 
-  // 3. Mise à jour complète (Nom, Email, Profession, Adresse physique)
+  // 3. Mise à jour complète (Nom, Email, Profession, Adresse physique) — non-bloquant
   if (customerId) {
-      console.log(`[CUSTOMER] Synchronisation finale des données pour ${customerId}...`);
-      await updateCustomerInShopify(admin, customerId, email, firstName, lastName, profession, adresse);
-      
-      // Ajout du Tag si manquant
+      try {
+        console.log(`[CUSTOMER] Synchronisation finale des données pour ${customerId}...`);
+        await updateCustomerInShopify(admin, customerId, email, firstName, lastName, profession, adresse);
+      } catch (updateErr) {
+        console.warn("[CUSTOMER] updateCustomerInShopify échoué (non-bloquant):", updateErr);
+      }
+
+      // Ajout du Tag si manquant — non-bloquant
       if (!currentTags.includes(PRO_TAG)) {
-          console.log(`[CUSTOMER] Ajout du tag pro...`);
-          const tagsAddMutation = `mutation tagsAdd($id: ID!, $tags: [String!]!) { tagsAdd(id: $id, tags: $tags) { userErrors { field message } } }`;
-          await admin.graphql(tagsAddMutation, { variables: { id: customerId, tags: [PRO_TAG] } });
+          try {
+            console.log(`[CUSTOMER] Ajout du tag pro...`);
+            const tagsAddMutation = `mutation tagsAdd($id: ID!, $tags: [String!]!) { tagsAdd(id: $id, tags: $tags) { userErrors { field message } } }`;
+            await admin.graphql(tagsAddMutation, { variables: { id: customerId, tags: [PRO_TAG] } });
+          } catch (tagErr) {
+            console.warn("[CUSTOMER] tagsAdd échoué (non-bloquant):", tagErr);
+          }
       }
   }
 
