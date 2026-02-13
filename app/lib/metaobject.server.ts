@@ -236,21 +236,26 @@ export async function createMetaobjectEntry(
   discountIdCreated = discountResult.discountId || null;
 
   try {
-    // 2. GESTION CLIENT (Création ou Tag + Metafields)
-    const clientResult = await ensureCustomerPro(
-      admin,
-      fields.email,
-      fields.first_name || "",
-      fields.last_name || "",
-      fields.profession,
-      fields.adresse,
-    );
-    if (!clientResult.success) {
-      throw new Error("Erreur Client Shopify: " + clientResult.error);
+    // 2. GESTION CLIENT (Création ou Tag + Metafields) — non-bloquant
+    try {
+      const clientResult = await ensureCustomerPro(
+        admin,
+        fields.email,
+        fields.first_name || "",
+        fields.last_name || "",
+        fields.profession,
+        fields.adresse,
+      );
+      if (clientResult.success) {
+        customerIdToSave = clientResult.customerId
+          ? String(clientResult.customerId)
+          : "";
+      } else {
+        console.warn("⚠️ [CLIENT] Sync client échoué (non-bloquant):", clientResult.error);
+      }
+    } catch (clientErr) {
+      console.warn("⚠️ [CLIENT] Sync client exception (non-bloquant):", clientErr);
     }
-    customerIdToSave = clientResult.customerId
-      ? String(clientResult.customerId)
-      : "";
 
     // 3. CRÉATION MÉTAOBJET
     const fieldsInput = [
@@ -284,11 +289,15 @@ export async function createMetaobjectEntry(
       throw new Error(data.data.metaobjectCreate.userErrors[0].message);
     }
 
-    // 4. Mise à jour metafield code_promo sur la fiche client
+    // 4. Mise à jour metafield code_promo sur la fiche client (non-bloquant)
     if (customerIdToSave) {
-      await updateCustomerProMetafields(admin, customerIdToSave, {
-        code_promo: String(fields.code),
-      });
+      try {
+        await updateCustomerProMetafields(admin, customerIdToSave, {
+          code_promo: String(fields.code),
+        });
+      } catch (mfErr) {
+        console.warn("⚠️ [CLIENT] Metafield code_promo non mis à jour (non-bloquant):", mfErr);
+      }
     }
 
     return { success: true };
@@ -402,20 +411,23 @@ export async function updateMetaobjectEntry(
       const adresseToUse =
         fields.adresse !== undefined ? fields.adresse : oldData.adresse;
 
-      const updateClientResult = await updateCustomerInShopify(
-        admin,
-        oldData.customer_id,
-        hasEmailChanged ? emailToUse : undefined,
-        (hasFirstNameChanged || hasLastNameChanged) ? firstNameToUse : undefined,
-        (hasFirstNameChanged || hasLastNameChanged) ? lastNameToUse : undefined,
-        professionToUse,
-        adresseToUse,
-      );
-
-      if (updateClientResult.success) {
-        console.log("✅ Client Shopify mis à jour (Infos + Adresse physique).");
-      } else {
-        console.error("❌ Echec update client:", updateClientResult.error);
+      try {
+        const updateClientResult = await updateCustomerInShopify(
+          admin,
+          oldData.customer_id,
+          hasEmailChanged ? emailToUse : undefined,
+          (hasFirstNameChanged || hasLastNameChanged) ? firstNameToUse : undefined,
+          (hasFirstNameChanged || hasLastNameChanged) ? lastNameToUse : undefined,
+          professionToUse,
+          adresseToUse,
+        );
+        if (updateClientResult.success) {
+          console.log("✅ Client Shopify mis à jour (Infos + Adresse physique).");
+        } else {
+          console.warn("⚠️ [CLIENT] Update client échoué (non-bloquant):", updateClientResult.error);
+        }
+      } catch (clientErr) {
+        console.warn("⚠️ [CLIENT] Update client exception (non-bloquant):", clientErr);
       }
     }
   }
