@@ -1,6 +1,5 @@
 import type { ActionFunctionArgs } from "react-router";
-import { authenticate } from "../shopify.server";
-import prisma from "../db.server";
+import { authenticate, sessionStorage } from "../shopify.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { shop, topic } = await authenticate.webhook(request);
@@ -8,7 +7,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   console.log(`Received ${topic} webhook for ${shop}`);
 
   if (shop) {
-    await prisma.session.deleteMany({ where: { shop } });
+    const sessions = await sessionStorage.findSessionsByShop(shop);
+    if (sessions.length > 0) {
+      await sessionStorage.deleteSessions(sessions.map((s) => s.id));
+    }
     console.log(`Sessions deleted for shop: ${shop}`);
   }
 

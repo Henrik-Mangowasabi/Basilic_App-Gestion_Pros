@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
-import prisma from "../db.server";
+import { appConfig } from "../config.server";
 import { updateCustomerProMetafields } from "../lib/customer.server";
 
 // Loader pour gérer les requêtes GET (tests de connectivité)
@@ -24,12 +24,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   try {
     const { admin, payload, shop, session, topic } = await authenticate.webhook(request);
 
-    // Charger la configuration (store unique, id=1)
-    let config = await prisma.config.findFirst();
-    if (!config) {
-      console.warn(`⚠️ Config non trouvée, utilisation des valeurs par défaut.`);
-      config = { threshold: 500.0, creditAmount: 10.0 } as any;
-    }
+    // Configuration depuis les env vars
+    const config = appConfig;
     console.log(`⚙️ Config utilisée - Seuil: ${config.threshold}€, Crédit: ${config.creditAmount}€`);
     
     console.log(`📥 Webhook reçu - Shop: ${shop}, Topic: ${topic}, Session: ${session ? "Oui" : "Non"}, Admin: ${admin ? "Oui" : "Non"}`);

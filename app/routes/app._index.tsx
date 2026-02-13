@@ -24,7 +24,7 @@ import {
 } from "../lib/metaobject.server";
 import { createCustomerMetafieldDefinitions } from "../lib/customer.server";
 
-import prisma from "../db.server";
+import { appConfig } from "../config.server";
 import * as XLSX from "xlsx";
 
 // --- LOADER ---
@@ -32,12 +32,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
   const status = await checkMetaobjectStatus(admin);
 
-  // Charger la config (seuil de crédit) ou la créer si inexistante (store unique, id=1)
-  const config = await prisma.config.upsert({
-    where: { id: 1 },
-    update: {},
-    create: { id: 1, threshold: 500.0, creditAmount: 10.0 },
-  });
+  const config = appConfig;
 
   let entries: Array<{
     id: string;
@@ -168,11 +163,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const threshold = parseFloat(formData.get("threshold") as string);
     const creditAmount = parseFloat(formData.get("creditAmount") as string);
 
-    await prisma.config.upsert({
-      where: { id: 1 },
-      update: { threshold, creditAmount },
-      create: { id: 1, threshold, creditAmount },
-    });
+    // Config managed via env vars CREDIT_THRESHOLD / CREDIT_AMOUNT on Render
+    console.log(`ℹ️ Config update requested: threshold=${threshold}, creditAmount=${creditAmount} — update env vars on Render`);
     return { success: "config_updated" };
   }
 
