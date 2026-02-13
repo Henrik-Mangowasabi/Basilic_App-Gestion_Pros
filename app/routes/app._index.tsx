@@ -21,6 +21,7 @@ import {
   updateMetaobjectEntry,
   deleteMetaobjectEntry,
   destroyMetaobjectStructure,
+  migrateMetaobjectDefinition,
 } from "../lib/metaobject.server";
 import { createCustomerMetafieldDefinitions } from "../lib/customer.server";
 
@@ -49,6 +50,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }> = [];
 
   if (status.exists) {
+    await migrateMetaobjectDefinition(admin);
     const entriesResult = await getMetaobjectEntries(admin);
     const rawEntries = entriesResult.entries;
 
