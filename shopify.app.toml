@@ -1,8 +1,8 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
-client_id = "d2fe99c79980e90f749520f7df8f7368"
-name = "Basilic App - Gestion Pros"
-application_url = "https://mm-gestion-pros-sante.onrender.com"
+client_id = "fc4f0b308b50f9a9d7a40b1ab9cab3a2"
+name = "Basilic App - Pros - Test"
+application_url = "https://basilic-app-gestion-pros-test.onrender.com"
 embedded = true
 
 [build]
