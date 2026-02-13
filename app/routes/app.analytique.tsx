@@ -10,8 +10,7 @@ import { appConfig } from "../config.server";
 import { Pagination } from "../components/Pagination";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { admin, session } = await authenticate.admin(request);
-  const shop = session.shop;
+  const { admin } = await authenticate.admin(request);
   const url = new URL(request.url);
   const startDateStr = url.searchParams.get("startDate");
   const endDateStr = url.searchParams.get("endDate");
@@ -26,7 +25,103 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       filters: { startDate: "", endDate: "" },
     };
 
-  const config = appConfig;)
+  const config = appConfig;
+
+  const result = await getMetaobjectEntries(admin);
+  const entries = result.entries || [];
+
+  let stats = {
+    totalOrders: 0,
+    totalRevenue: 0,
+    activePros: entries.filter((entry: any) => entry.status !== false).length,
+    totalPros: entries.length,
+    isFiltered: !!(startDateStr || endDateStr),
+  };
+
+  let ranking: any[] = [];
+
+  if (stats.isFiltered) {
+    // LOGIQUE DE FILTRAGE PAR DATE (Appel Shopify avec Pagination)
+    const dateQueryParts = [];
+    if (startDateStr) dateQueryParts.push(`created_at:>=${startDateStr}`);
+    if (endDateStr) dateQueryParts.push(`created_at:<=${endDateStr}`);
+    // On ne cible que les commandes ayant un code promo pour économiser du quota
+    dateQueryParts.push(`discount_code:*`);
+
+    const queryString = dateQueryParts.join(" AND ");
+    const proStats = new Map<string, { revenue: number; count: number }>();
+
+    const query = `#graphql
+      query getOrdersByDate($queryString: String!, $cursor: String) {
+        orders(first: 250, query: $queryString, after: $cursor) {
+          edges {
+            node {
+              totalPriceSet {
+                shopMoney {
+                  amount
+                }
+              }
+              discountCodes
+            }
+          }
+          pageInfo {
+            hasNextPage
+            endCursor
+          }
+        }
+      }
+    `;
+
+    try {
+      let hasNextPage = true;
+      let cursor = null;
+      let pagesLoaded = 0;
+      const maxPages = 4; // On limite à 1000 commandes (4x250) pour garder une page rapide
+
+      while (hasNextPage && pagesLoaded < maxPages) {
+        const response = await admin.graphql(query, {
+          variables: { queryString, cursor },
+        });
+        const data = await response.json();
+        const ordersEdges = data.data?.orders?.edges || [];
+
+        ordersEdges.forEach((edge: any) => {
+          const order = edge.node;
+          const revenue = parseFloat(order.totalPriceSet.shopMoney.amount);
+          const codesUsed = order.discountCodes || [];
+
+          codesUsed.forEach((code: string) => {
+            const current = proStats.get(code) || { revenue: 0, count: 0 };
+            proStats.set(code, {
+              revenue: current.revenue + revenue,
+              count: current.count + 1,
+            });
+            stats.totalRevenue += revenue;
+            stats.totalOrders += 1;
+          });
+        });
+
+        const pageInfo = data.data?.orders?.pageInfo;
+        hasNextPage = pageInfo?.hasNextPage;
+        cursor = pageInfo?.endCursor;
+        pagesLoaded++;
+      }
+
+      ranking = entries
+        .map((entry: any) => {
+          const periodData = proStats.get(entry.code) || {
+            revenue: 0,
+            count: 0,
+          };
+          return {
+            id: entry.id,
+            name: [entry.first_name, entry.last_name].filter(Boolean).join(" ") || entry.name || "Sans nom",
+            code: entry.code || "-",
+            revenue: periodData.revenue,
+            ordersCount: periodData.count,
+            email: entry.email || "-",
+          };
+        })
         .sort((a, b) => b.revenue - a.revenue);
     } catch (e) {
       console.error("Erreur filtrage analytique:", e);
