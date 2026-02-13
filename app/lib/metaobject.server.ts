@@ -533,9 +533,13 @@ export async function updateMetaobjectEntry(
     // Mise à jour metafield code_promo si le code a changé
     const codeChanged = fields.code && fields.code !== oldData.code;
     if (codeChanged && oldData.customer_id) {
-      await updateCustomerProMetafields(admin, oldData.customer_id, {
-        code_promo: String(mergedCode),
-      });
+      try {
+        await updateCustomerProMetafields(admin, oldData.customer_id, {
+          code_promo: String(mergedCode),
+        });
+      } catch (mfErr) {
+        console.warn("⚠️ [CLIENT] Metafield code_promo non mis à jour (non-bloquant):", mfErr);
+      }
     }
 
     return { success: true };
@@ -563,8 +567,12 @@ export async function deleteMetaobjectEntry(
       (f: any) => f.key === "discount_id",
     )?.value;
 
-    if (linkedCustomerId) await removeCustomerProTag(admin, linkedCustomerId);
-    else if (entryEmail) await removeCustomerProTag(admin, entryEmail);
+    try {
+      if (linkedCustomerId) await removeCustomerProTag(admin, linkedCustomerId);
+      else if (entryEmail) await removeCustomerProTag(admin, entryEmail);
+    } catch (tagErr) {
+      console.warn("⚠️ [CLIENT] Suppression tag client échouée (non-bloquant):", tagErr);
+    }
 
     if (existingDiscountId)
       await deleteShopifyDiscount(admin, existingDiscountId);
