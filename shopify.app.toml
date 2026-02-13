@@ -25,4 +25,9 @@ scopes = "read_customers,write_customers,read_discounts,write_discounts,write_me
 
 
 [auth]
-redirect_urls = [ "https://mm-gestion-pros-sante.onrender.com/auth/callback", "https://mm-gestion-pros-sante.onrender.com/auth/shopify/callback" ]
+redirect_urls = [
+  "https://mm-gestion-pros-sante.onrender.com/auth/callback",
+  "https://mm-gestion-pros-sante.onrender.com/auth/shopify/callback",
+  "https://basilic-app-gestion-pros-test.onrender.com/auth/callback",
+  "https://basilic-app-gestion-pros-test.onrender.com/auth/shopify/callback"
+]
