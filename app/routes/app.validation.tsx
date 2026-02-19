@@ -252,7 +252,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // Fetch existing codes
     const entriesResult = await getMetaobjectEntries(admin);
-    const existingCodes = new Set(
+    const existingCodes = new Set<string>(
       entriesResult.entries.map((e: any) => e.code).filter(Boolean),
     );
 
@@ -753,7 +753,7 @@ export default function ValidationPage() {
       )
     : customers;
 
-  const existingCodes = new Set(rawExistingCodes);
+  const existingCodes = new Set<string>(rawExistingCodes);
 
   const toggleSelectAll = () => {
     if (selectedIds.size === filtered.length) {

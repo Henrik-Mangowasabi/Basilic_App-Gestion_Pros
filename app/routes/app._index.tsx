@@ -159,7 +159,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     // Attacher les stats aux entries
     entries = entries.map((entry: any) => { // eslint-disable-line @typescript-eslint/no-explicit-any
       const stats = proStats.get(entry.code) || { revenue: 0, count: 0 };
-      const creditEarned = (stats.revenue / config.threshold) * config.creditAmount;
+      const creditEarned = Math.floor(stats.revenue / config.threshold) * config.creditAmount;
       return {
         ...entry,
         cache_orders_count: String(stats.count),
@@ -1459,7 +1459,7 @@ function exportToExcel(entries: Array<{
 
 // --- PAGE PRINCIPALE ---
 export default function Index() {
-  const { status, entries, shopDomain } = useLoaderData<typeof loader>();
+  const { status, entries, config: serverConfig, shopDomain } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const [searchParams, setSearchParams] = useSearchParams();
   const nav = useNavigation();
@@ -1475,7 +1475,14 @@ export default function Index() {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [sortConfig, setSortConfig] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
-  const { showCodeBlock, setShowCodeBlock, showCABlock, setShowCABlock, isLocked, showToast } = useEditMode();
+  const { showCodeBlock, setShowCodeBlock, showCABlock, setShowCABlock, isLocked, showToast, setConfig } = useEditMode();
+
+  // Synchroniser le config serveur vers le context client (au chargement de la page)
+  useEffect(() => {
+    if (serverConfig && serverConfig.threshold && serverConfig.creditAmount) {
+      setConfig({ threshold: serverConfig.threshold, creditAmount: serverConfig.creditAmount });
+    }
+  }, [serverConfig?.threshold, serverConfig?.creditAmount]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSort = (key: string) => {
     const labels: Record<string, string> = { name: "Nom", profession: "Profession", status: "État", orders: "Commandes", revenue: "CA généré" };
