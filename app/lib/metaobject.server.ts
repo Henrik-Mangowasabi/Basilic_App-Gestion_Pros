@@ -72,6 +72,9 @@ export async function migrateMetaobjectDefinition(admin: AdminApiContext) {
     if (!existingKeys.includes("cache_credit_earned")) {
       toAdd.push({ name: "Cache Credit Earned", key: "cache_credit_earned", type: "number_decimal", required: false });
     }
+    if (!existingKeys.includes("cache_ca_remainder")) {
+      toAdd.push({ name: "Cache CA Remainder", key: "cache_ca_remainder", type: "number_decimal", required: false });
+    }
 
     if (toAdd.length === 0) return; // Déjà à jour
 
@@ -193,6 +196,12 @@ export async function createMetaobject(admin: AdminApiContext) {
     {
       name: "Cache Credit Earned",
       key: "cache_credit_earned",
+      type: "number_decimal",
+      required: false,
+    },
+    {
+      name: "Cache CA Remainder",
+      key: "cache_ca_remainder",
       type: "number_decimal",
       required: false,
     },
@@ -335,6 +344,7 @@ export async function createMetaobjectEntry(
       { key: "cache_revenue", value: "0" },
       { key: "cache_orders_count", value: "0" },
       { key: "cache_credit_earned", value: "0" },
+      { key: "cache_ca_remainder", value: "0" },
     ];
 
     const mutation = `mutation metaobjectCreate($metaobject: MetaobjectCreateInput!) { metaobjectCreate(metaobject: $metaobject) { metaobject { id }, userErrors { field message } } }`;
