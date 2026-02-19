@@ -1389,6 +1389,74 @@ function SortIcon({ active, dir }: { active: boolean; dir: "asc" | "desc" | null
   );
 }
 
+// --- FONCTION D'EXPORT ---
+function exportToExcel(entries: Array<{
+  id: string;
+  identification?: string;
+  first_name?: string;
+  last_name?: string;
+  name?: string;
+  email?: string;
+  code?: string;
+  montant?: number;
+  type?: string;
+  profession?: string;
+  adresse?: string;
+  customer_id?: string;
+  tags?: string[];
+}>) {
+  // Préparer les données pour l'export
+  const exportData = entries.map((entry) => {
+    // Séparer le nom complet en prénom et nom
+    let firstName = "";
+    let lastName = "";
+
+    if (entry.first_name && entry.last_name) {
+      firstName = entry.first_name;
+      lastName = entry.last_name;
+    } else if (entry.name) {
+      const nameParts = entry.name.split(" ");
+      firstName = nameParts[0] || "";
+      lastName = nameParts.slice(1).join(" ") || "";
+    }
+
+    return {
+      "Prénom": firstName,
+      "Nom": lastName,
+      "Email": entry.email || "",
+      "Adresse": entry.adresse || "",
+      "Profession": entry.profession || "",
+      "Code": entry.code || "",
+      "Montant": entry.montant || "",
+      "Type": entry.type || "%",
+    };
+  });
+
+  // Créer le workbook et la worksheet
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(exportData);
+
+  // Définir la largeur des colonnes
+  ws["!cols"] = [
+    { wch: 15 }, // Prénom
+    { wch: 15 }, // Nom
+    { wch: 30 }, // Email
+    { wch: 30 }, // Adresse
+    { wch: 20 }, // Profession
+    { wch: 15 }, // Code
+    { wch: 10 }, // Montant
+    { wch: 8 },  // Type
+  ];
+
+  // Ajouter la feuille au workbook
+  XLSX.utils.book_append_sheet(wb, ws, "Partenaires");
+
+  // Générer le fichier et le télécharger
+  const today = new Date().toISOString().split("T")[0];
+  const fileName = `partenaires_${today}.xlsx`;
+  XLSX.writeFile(wb, fileName);
+}
+
 // --- PAGE PRINCIPALE ---
 export default function Index() {
   const { status, entries, shopDomain } = useLoaderData<typeof loader>();
@@ -1730,6 +1798,18 @@ export default function Index() {
                     <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" />
                   </svg>
                   Importer
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--secondary table-card__new-btn"
+                  onClick={() => exportToExcel(entries)}
+                  disabled={entries.length === 0}
+                  title="Exporter tous les partenaires en Excel"
+                >
+                  <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM6.293 6.707a1 1 0 010-1.414l3-3a1 1 0 011.414 0l3 3a1 1 0 01-1.414 1.414L11 5.414V13a1 1 0 11-2 0V5.414L7.707 6.707a1 1 0 01-1.414 0z" clipRule="evenodd" />
+                  </svg>
+                  Exporter
                 </button>
                 <button
                   type="button"
