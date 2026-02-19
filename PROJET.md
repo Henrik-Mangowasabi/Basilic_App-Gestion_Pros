@@ -128,7 +128,7 @@ Action principale : **activer / désactiver** un code promo (met à jour `endsAt
 
 ---
 
-### 4.3 Gestion Clients Pros (`/app/clients`)
+### 4.3 Gestion Chiffre d'affaires (`/app/clients`)
 
 Vue analytique par pro :
 - Nom du professionnel

@@ -70,6 +70,35 @@ export async function updateCustomerProMetafields(
   }
 }
 
+export async function deleteCustomerCodePromo(admin: AdminApiContext, customerId: string) {
+  // Supprime la valeur du MF code_promo pour ce client (la définition MF reste intacte)
+  const mutation = `
+    mutation metafieldsDelete($metafields: [MetafieldIdentifierInput!]!) {
+      metafieldsDelete(metafields: $metafields) {
+        deletedMetafields { ownerId namespace key }
+        userErrors { field message }
+      }
+    }
+  `;
+  try {
+    const r = await admin.graphql(mutation, {
+      variables: {
+        metafields: [{ ownerId: customerId, namespace: "custom", key: "code_promo" }],
+      },
+    });
+    const d = await r.json() as any;
+    if (d.data?.metafieldsDelete?.userErrors?.length > 0) {
+      console.warn("[MF PRO] Erreur vidage code_promo MF:", d.data.metafieldsDelete.userErrors);
+      return { success: false, error: d.data.metafieldsDelete.userErrors[0].message };
+    }
+    console.log("[MF PRO] code_promo MF vidé pour :", customerId);
+    return { success: true };
+  } catch (e) {
+    console.error("[MF PRO] Crash vidage code_promo MF:", e);
+    return { success: false, error: String(e) };
+  }
+}
+
 export async function ensureCustomerPro(admin: AdminApiContext, rawEmail: string, firstName: string, lastName: string, profession?: string, adresse?: string) {
   const email = cleanEmail(rawEmail);
 

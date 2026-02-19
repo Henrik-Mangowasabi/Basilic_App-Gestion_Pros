@@ -11,6 +11,7 @@ import {
   removeCustomerProTag,
   updateCustomerInShopify,
   updateCustomerProMetafields,
+  deleteCustomerCodePromo,
 } from "./customer.server";
 
 const METAOBJECT_TYPE = "mm_pro_de_sante";
@@ -572,6 +573,15 @@ export async function deleteMetaobjectEntry(
       else if (entryEmail) await removeCustomerProTag(admin, entryEmail);
     } catch (tagErr) {
       console.warn("⚠️ [CLIENT] Suppression tag client échouée (non-bloquant):", tagErr);
+    }
+
+    // Supprimer le metafield code_promo du client associé (non-bloquant)
+    if (linkedCustomerId) {
+      try {
+        await deleteCustomerCodePromo(admin, linkedCustomerId);
+      } catch (mfErr) {
+        console.warn("⚠️ [CLIENT] Suppression metafield code_promo échouée (non-bloquant):", mfErr);
+      }
     }
 
     if (existingDiscountId)
