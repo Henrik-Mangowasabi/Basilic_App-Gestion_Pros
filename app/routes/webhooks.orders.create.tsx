@@ -1,4 +1,5 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import crypto from "crypto";
 import { authenticate } from "../shopify.server";
 import { getShopConfig } from "../config.server";
 import { updateCustomerProMetafields } from "../lib/customer.server";
@@ -7,20 +8,51 @@ import { updateCustomerProMetafields } from "../lib/customer.server";
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export const loader = async (_args: LoaderFunctionArgs) => {
   console.log(`ℹ️ Requête GET reçue sur le webhook orders/create. Ceci est normal pour un test de connectivité.`);
-  return new Response(JSON.stringify({ 
-    message: "Webhook orders/create endpoint", 
+  return new Response(JSON.stringify({
+    message: "Webhook orders/create endpoint",
     method: "Use POST to trigger webhook",
-    registered: true 
-  }), { 
-    status: 200, 
-    headers: { "Content-Type": "application/json" } 
+    registered: true
+  }), {
+    status: 200,
+    headers: { "Content-Type": "application/json" }
   });
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   // Log IMMÉDIAT pour voir si la route est appelée
   console.log(`🚨 ===== WEBHOOK ORDERS/CREATE APPELÉ =====`);
-  
+
+  // ─── DIAGNOSTIC DÉTAILLÉ ───
+  const hmacHeader = request.headers.get("X-Shopify-Hmac-Sha256");
+  const topicHeader = request.headers.get("X-Shopify-Topic");
+  const shopHeader = request.headers.get("X-Shopify-Shop-Domain");
+  const apiVersionHeader = request.headers.get("X-Shopify-API-Version");
+  const secret = process.env.SHOPIFY_API_SECRET || "";
+
+  console.log(`🔍 DIAG Headers: HMAC=${hmacHeader ? "present(" + hmacHeader.length + "chars)" : "MISSING"}, Topic=${topicHeader}, Shop=${shopHeader}, APIVersion=${apiVersionHeader}`);
+  console.log(`🔍 DIAG Secret: length=${secret.length}, first3="${secret.substring(0, 3)}", last3="${secret.substring(secret.length - 3)}"`);
+  console.log(`🔍 DIAG API_KEY: ${process.env.SHOPIFY_API_KEY ? "present" : "MISSING"}`);
+
+  // Cloner le request pour lire le body sans le consommer
+  const clonedReq = request.clone();
+  const rawBody = await clonedReq.text();
+  console.log(`🔍 DIAG Body: length=${rawBody.length}`);
+
+  // Vérification HMAC manuelle
+  if (hmacHeader && secret) {
+    const computedHmac = crypto
+      .createHmac("sha256", secret)
+      .update(rawBody, "utf8")
+      .digest("base64");
+    const hmacMatch = computedHmac === hmacHeader;
+    console.log(`🔍 DIAG HMAC manual check: match=${hmacMatch}`);
+    if (!hmacMatch) {
+      console.log(`🔍 DIAG computed=${computedHmac}`);
+      console.log(`🔍 DIAG received=${hmacHeader}`);
+    }
+  }
+  // ─── FIN DIAGNOSTIC ───
+
   try {
     const { admin, payload, shop, session, topic } = await authenticate.webhook(request);
 
