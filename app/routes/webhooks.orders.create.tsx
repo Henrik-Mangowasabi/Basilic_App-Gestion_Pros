@@ -320,27 +320,36 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       let currentRevenue = 0;
       let previousCreditEarned = 0;
       let currentCount = 0;
+      let currentRemainder = 0;
 
       metaobjectNode.fields.forEach((f: any) => {
         if (f.key === "cache_revenue" && f.value) currentRevenue = parseFloat(f.value);
         if (f.key === "cache_credit_earned" && f.value) previousCreditEarned = parseFloat(f.value);
         if (f.key === "cache_orders_count" && f.value) currentCount = parseInt(f.value);
+        if (f.key === "cache_ca_remainder" && f.value) currentRemainder = parseFloat(f.value);
       });
 
-      console.log(`📊 État actuel - CA: ${currentRevenue}€ | Commandes: ${currentCount} | Crédit déjà versé: ${previousCreditEarned}€`);
+      console.log(`📊 État actuel - CA: ${currentRevenue}€ | Commandes: ${currentCount} | Crédit déjà versé: ${previousCreditEarned}€ | Reste: ${currentRemainder}€`);
 
-      // 2. Calcul du NOUVEAU total théorique
+      // 2. Logique incrémentale par paliers
       const newRevenue = currentRevenue + orderAmount;
       const newCount = currentCount + 1;
-      
-      // Règle dynamique depuis les réglages de l'app
-      const totalCreditShouldBe = Math.floor(newRevenue / config.threshold) * config.creditAmount;
 
-      // 3. Calcul du montant à verser (Le Delta)
-      const amountToDeposit = totalCreditShouldBe - previousCreditEarned;
+      // Le remainder = CA accumulé depuis le dernier palier + montant de cette commande
+      let remainder = currentRemainder + orderAmount;
+      let creditsToAdd = 0;
+
+      // Tant que le remainder dépasse le seuil, on ajoute un palier
+      while (remainder >= config.threshold) {
+        creditsToAdd += config.creditAmount;
+        remainder -= config.threshold;
+      }
+
+      const newCreditEarned = previousCreditEarned + creditsToAdd;
+      const amountToDeposit = creditsToAdd;
 
       console.log(`💰 Nouveau CA: ${newRevenue}€ | Nouveau nombre de commandes: ${newCount}`);
-      console.log(`💳 Crédit total dû: ${totalCreditShouldBe}€ | Montant à verser: ${amountToDeposit}€`);
+      console.log(`💳 Paliers franchis: ${creditsToAdd > 0 ? creditsToAdd / config.creditAmount : 0} | Crédits à verser: ${amountToDeposit}€ | Nouveau total gagné: ${newCreditEarned}€ | Reste avant prochain palier: ${remainder.toFixed(2)}€`);
 
       if (amountToDeposit > 0) {
         console.log(`🚀 VIREMENT EN COURS DE ${amountToDeposit}€ ...`);
@@ -435,14 +444,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         }
       }
 
-      // 4. Mettre à jour notre cache (pour ne pas le re-payer la prochaine fois)
-      // On met à jour "cache_credit_earned" avec le nouveau total théorique
+      // 4. Mettre à jour notre cache (incrémental avec remainder)
       console.log(`🔄 Mise à jour du metaobject ${metaobjectNode.id}...`);
       const updateResponse = await adminContext.graphql(`#graphql
         mutation metaobjectUpdate($id: ID!, $metaobject: MetaobjectUpdateInput!) {
-          metaobjectUpdate(id: $id, metaobject: $metaobject) { 
+          metaobjectUpdate(id: $id, metaobject: $metaobject) {
             metaobject { id }
-            userErrors { field message } 
+            userErrors { field message }
           }
         }
       `, {
@@ -452,12 +460,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             fields: [
               { key: "cache_revenue", value: String(newRevenue) },
               { key: "cache_orders_count", value: String(newCount) },
-              { key: "cache_credit_earned", value: String(totalCreditShouldBe) } // Important : On stocke le nouveau palier atteint
+              { key: "cache_credit_earned", value: String(newCreditEarned) },
+              { key: "cache_ca_remainder", value: String(remainder) }
             ]
           }
         }
       });
-      
+
       const updateData = await updateResponse.json() as any;
       if (updateData.errors) {
         console.error("❌ Erreur GraphQL lors de la mise à jour:", updateData.errors);
@@ -468,7 +477,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         console.log(`📝 Détails de la mise à jour:`);
         console.log(`   - cache_revenue: ${currentRevenue} → ${newRevenue}`);
         console.log(`   - cache_orders_count: ${currentCount} → ${newCount}`);
-        console.log(`   - cache_credit_earned: ${previousCreditEarned} → ${totalCreditShouldBe}`);
+        console.log(`   - cache_credit_earned: ${previousCreditEarned} → ${newCreditEarned}`);
+        console.log(`   - cache_ca_remainder: ${currentRemainder} → ${remainder}`);
 
         // Mise à jour dynamique du metafield ca_genere sur la fiche client
         if (customerIdValue) {

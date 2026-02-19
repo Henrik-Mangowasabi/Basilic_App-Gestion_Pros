@@ -111,62 +111,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       credit_balance: entry.customer_id ? creditBalanceMap.get(entry.customer_id) || 0 : 0,
     }));
 
-    // Calculer les statistiques de commandes pour chaque code promo
-    const allowedCodes = new Set(entries.map((e: any) => e.code).filter(Boolean)); // eslint-disable-line @typescript-eslint/no-explicit-any
-    const proStats = new Map<string, { revenue: number; count: number }>();
-
-    if (allowedCodes.size > 0) {
-      try {
-        const allOrdersQuery = `#graphql
-          query getAllOrders($queryString: String!, $cursor: String) {
-            orders(first: 250, query: $queryString, after: $cursor) {
-              edges {
-                node {
-                  totalPriceSet { shopMoney { amount } }
-                  discountCodes
-                }
-              }
-              pageInfo { hasNextPage endCursor }
-            }
-          }
-        `;
-        const currentYear = new Date().getFullYear();
-        let hasNextPage = true;
-        let cursor = null;
-        while (hasNextPage) {
-          const response = await admin.graphql(allOrdersQuery, {
-            variables: { queryString: `created_at:>=${currentYear}-01-01 AND discount_code:*`, cursor },
-          });
-          const data = await response.json() as any; // eslint-disable-line @typescript-eslint/no-explicit-any
-          for (const edge of data.data?.orders?.edges || []) {
-            const revenue = parseFloat(edge.node.totalPriceSet.shopMoney.amount);
-            const codesUsed: string[] = edge.node.discountCodes || [];
-            const relevantCodes = codesUsed.filter((c) => allowedCodes.has(c));
-            relevantCodes.forEach((code) => {
-              const cur = proStats.get(code) || { revenue: 0, count: 0 };
-              proStats.set(code, { revenue: cur.revenue + revenue, count: cur.count + 1 });
-            });
-          }
-          const pageInfo = data.data?.orders?.pageInfo as any; // eslint-disable-line @typescript-eslint/no-explicit-any
-          hasNextPage = pageInfo?.hasNextPage;
-          cursor = pageInfo?.endCursor;
-        }
-      } catch (e) {
-        console.error("Erreur chargement stats commandes:", e);
-      }
-    }
-
-    // Attacher les stats aux entries
-    entries = entries.map((entry: any) => { // eslint-disable-line @typescript-eslint/no-explicit-any
-      const stats = proStats.get(entry.code) || { revenue: 0, count: 0 };
-      const creditEarned = (stats.revenue / config.threshold) * config.creditAmount;
-      return {
-        ...entry,
-        cache_orders_count: String(stats.count),
-        cache_revenue: String(stats.revenue.toFixed(2)),
-        cache_credit_earned: String(creditEarned.toFixed(2)),
-      };
-    });
+    // Les valeurs cache_revenue, cache_orders_count, cache_credit_earned et cache_ca_remainder
+    // sont lues directement depuis le metaobject (mises à jour incrémentalement par le webhook).
+    // Pas besoin de requêter toutes les commandes à chaque chargement de page.
   }
 
   return { status, entries, config, shopDomain };
@@ -1459,7 +1406,7 @@ function exportToExcel(entries: Array<{
 
 // --- PAGE PRINCIPALE ---
 export default function Index() {
-  const { status, entries, shopDomain } = useLoaderData<typeof loader>();
+  const { status, entries, config: serverConfig, shopDomain } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const [searchParams, setSearchParams] = useSearchParams();
   const nav = useNavigation();
@@ -1475,7 +1422,14 @@ export default function Index() {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [sortConfig, setSortConfig] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
-  const { showCodeBlock, setShowCodeBlock, showCABlock, setShowCABlock, isLocked, showToast } = useEditMode();
+  const { showCodeBlock, setShowCodeBlock, showCABlock, setShowCABlock, isLocked, showToast, setConfig } = useEditMode();
+
+  // Synchroniser le config serveur vers le context client (au chargement de la page)
+  useEffect(() => {
+    if (serverConfig && serverConfig.threshold && serverConfig.creditAmount) {
+      setConfig({ threshold: serverConfig.threshold, creditAmount: serverConfig.creditAmount });
+    }
+  }, [serverConfig?.threshold, serverConfig?.creditAmount]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSort = (key: string) => {
     const labels: Record<string, string> = { name: "Nom", profession: "Profession", status: "État", orders: "Commandes", revenue: "CA généré" };
