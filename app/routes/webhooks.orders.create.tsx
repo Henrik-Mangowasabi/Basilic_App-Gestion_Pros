@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
-import { appConfig } from "../config.server";
+import { getShopConfig } from "../config.server";
 import { updateCustomerProMetafields } from "../lib/customer.server";
 
 // Loader pour gérer les requêtes GET (tests de connectivité)
@@ -24,8 +24,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   try {
     const { admin, payload, shop, session, topic } = await authenticate.webhook(request);
 
-    // Configuration depuis les env vars
-    const config = appConfig;
+    // IMPORTANT: Récupérer la config depuis les shop metafields (pas les env vars hardcodées)
+    const config = await getShopConfig(admin);
     console.log(`⚙️ Config utilisée - Seuil: ${config.threshold}€, Crédit: ${config.creditAmount}€`);
     
     console.log(`📥 Webhook reçu - Shop: ${shop}, Topic: ${topic}, Session: ${session ? "Oui" : "Non"}, Admin: ${admin ? "Oui" : "Non"}`);

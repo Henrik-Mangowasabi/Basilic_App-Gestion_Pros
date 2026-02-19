@@ -11,6 +11,7 @@ import {
   removeCustomerProTag,
   updateCustomerInShopify,
   updateCustomerProMetafields,
+  deleteCustomerCodePromo,
 } from "./customer.server";
 
 const METAOBJECT_TYPE = "mm_pro_de_sante";
@@ -35,6 +36,65 @@ export async function checkMetaobjectExists(
 export async function checkMetaobjectStatus(admin: AdminApiContext) {
   const exists = await checkMetaobjectExists(admin);
   return { exists };
+}
+
+// --- MIGRATION : Ajoute first_name/last_name si manquants dans la définition ---
+export async function migrateMetaobjectDefinition(admin: AdminApiContext) {
+  try {
+    // 1. Récupérer l'id de la définition et ses champs actuels
+    const query = `query {
+      metaobjectDefinitions(first: 250) {
+        edges { node { id type fieldDefinitions { key } } }
+      }
+    }`;
+    const r = await admin.graphql(query);
+    const d = (await r.json()) as any;
+    const defNode = d.data?.metaobjectDefinitions?.edges?.find(
+      (e: any) => e.node?.type === METAOBJECT_TYPE,
+    )?.node;
+    if (!defNode) return;
+
+    const existingKeys: string[] = defNode.fieldDefinitions.map((f: any) => f.key);
+    const toAdd: any[] = [];
+
+    if (!existingKeys.includes("first_name")) {
+      toAdd.push({ name: "Prénom", key: "first_name", type: "single_line_text_field", required: false });
+    }
+    if (!existingKeys.includes("last_name")) {
+      toAdd.push({ name: "Nom", key: "last_name", type: "single_line_text_field", required: false });
+    }
+    if (!existingKeys.includes("cache_revenue")) {
+      toAdd.push({ name: "Cache Revenue", key: "cache_revenue", type: "number_decimal", required: false });
+    }
+    if (!existingKeys.includes("cache_orders_count")) {
+      toAdd.push({ name: "Cache Orders Count", key: "cache_orders_count", type: "number_integer", required: false });
+    }
+    if (!existingKeys.includes("cache_credit_earned")) {
+      toAdd.push({ name: "Cache Credit Earned", key: "cache_credit_earned", type: "number_decimal", required: false });
+    }
+
+    if (toAdd.length === 0) return; // Déjà à jour
+
+    console.log(`[MIGRATE] Ajout de ${toAdd.length} champ(s) à la définition:`, toAdd.map(f => f.key));
+
+    const mutation = `mutation metaobjectDefinitionUpdate($id: ID!, $definition: MetaobjectDefinitionUpdateInput!) {
+      metaobjectDefinitionUpdate(id: $id, definition: $definition) {
+        metaobjectDefinition { id }
+        userErrors { field message }
+      }
+    }`;
+    const mr = await admin.graphql(mutation, {
+      variables: { id: defNode.id, definition: { addFieldDefinitions: toAdd } },
+    });
+    const md = (await mr.json()) as any;
+    if (md.data?.metaobjectDefinitionUpdate?.userErrors?.length > 0) {
+      console.warn("[MIGRATE] Erreurs migration:", md.data.metaobjectDefinitionUpdate.userErrors);
+    } else {
+      console.log("[MIGRATE] Migration définition réussie.");
+    }
+  } catch (e) {
+    console.warn("[MIGRATE] Exception migration (non-bloquant):", e);
+  }
 }
 
 // --- CRÉATION STRUCTURE ---
@@ -236,21 +296,26 @@ export async function createMetaobjectEntry(
   discountIdCreated = discountResult.discountId || null;
 
   try {
-    // 2. GESTION CLIENT (Création ou Tag + Metafields)
-    const clientResult = await ensureCustomerPro(
-      admin,
-      fields.email,
-      fields.first_name || "",
-      fields.last_name || "",
-      fields.profession,
-      fields.adresse,
-    );
-    if (!clientResult.success) {
-      throw new Error("Erreur Client Shopify: " + clientResult.error);
+    // 2. GESTION CLIENT (Création ou Tag + Metafields) — non-bloquant
+    try {
+      const clientResult = await ensureCustomerPro(
+        admin,
+        fields.email,
+        fields.first_name || "",
+        fields.last_name || "",
+        fields.profession,
+        fields.adresse,
+      );
+      if (clientResult.success) {
+        customerIdToSave = clientResult.customerId
+          ? String(clientResult.customerId)
+          : "";
+      } else {
+        console.warn("⚠️ [CLIENT] Sync client échoué (non-bloquant):", clientResult.error);
+      }
+    } catch (clientErr) {
+      console.warn("⚠️ [CLIENT] Sync client exception (non-bloquant):", clientErr);
     }
-    customerIdToSave = clientResult.customerId
-      ? String(clientResult.customerId)
-      : "";
 
     // 3. CRÉATION MÉTAOBJET
     const fieldsInput = [
@@ -284,11 +349,15 @@ export async function createMetaobjectEntry(
       throw new Error(data.data.metaobjectCreate.userErrors[0].message);
     }
 
-    // 4. Mise à jour metafield code_promo sur la fiche client
+    // 4. Mise à jour metafield code_promo sur la fiche client (non-bloquant)
     if (customerIdToSave) {
-      await updateCustomerProMetafields(admin, customerIdToSave, {
-        code_promo: String(fields.code),
-      });
+      try {
+        await updateCustomerProMetafields(admin, customerIdToSave, {
+          code_promo: String(fields.code),
+        });
+      } catch (mfErr) {
+        console.warn("⚠️ [CLIENT] Metafield code_promo non mis à jour (non-bloquant):", mfErr);
+      }
     }
 
     return { success: true };
@@ -402,20 +471,23 @@ export async function updateMetaobjectEntry(
       const adresseToUse =
         fields.adresse !== undefined ? fields.adresse : oldData.adresse;
 
-      const updateClientResult = await updateCustomerInShopify(
-        admin,
-        oldData.customer_id,
-        hasEmailChanged ? emailToUse : undefined,
-        (hasFirstNameChanged || hasLastNameChanged) ? firstNameToUse : undefined,
-        (hasFirstNameChanged || hasLastNameChanged) ? lastNameToUse : undefined,
-        professionToUse,
-        adresseToUse,
-      );
-
-      if (updateClientResult.success) {
-        console.log("✅ Client Shopify mis à jour (Infos + Adresse physique).");
-      } else {
-        console.error("❌ Echec update client:", updateClientResult.error);
+      try {
+        const updateClientResult = await updateCustomerInShopify(
+          admin,
+          oldData.customer_id,
+          hasEmailChanged ? emailToUse : undefined,
+          (hasFirstNameChanged || hasLastNameChanged) ? firstNameToUse : undefined,
+          (hasFirstNameChanged || hasLastNameChanged) ? lastNameToUse : undefined,
+          professionToUse,
+          adresseToUse,
+        );
+        if (updateClientResult.success) {
+          console.log("✅ Client Shopify mis à jour (Infos + Adresse physique).");
+        } else {
+          console.warn("⚠️ [CLIENT] Update client échoué (non-bloquant):", updateClientResult.error);
+        }
+      } catch (clientErr) {
+        console.warn("⚠️ [CLIENT] Update client exception (non-bloquant):", clientErr);
       }
     }
   }
@@ -462,9 +534,13 @@ export async function updateMetaobjectEntry(
     // Mise à jour metafield code_promo si le code a changé
     const codeChanged = fields.code && fields.code !== oldData.code;
     if (codeChanged && oldData.customer_id) {
-      await updateCustomerProMetafields(admin, oldData.customer_id, {
-        code_promo: String(mergedCode),
-      });
+      try {
+        await updateCustomerProMetafields(admin, oldData.customer_id, {
+          code_promo: String(mergedCode),
+        });
+      } catch (mfErr) {
+        console.warn("⚠️ [CLIENT] Metafield code_promo non mis à jour (non-bloquant):", mfErr);
+      }
     }
 
     return { success: true };
@@ -492,8 +568,21 @@ export async function deleteMetaobjectEntry(
       (f: any) => f.key === "discount_id",
     )?.value;
 
-    if (linkedCustomerId) await removeCustomerProTag(admin, linkedCustomerId);
-    else if (entryEmail) await removeCustomerProTag(admin, entryEmail);
+    try {
+      if (linkedCustomerId) await removeCustomerProTag(admin, linkedCustomerId);
+      else if (entryEmail) await removeCustomerProTag(admin, entryEmail);
+    } catch (tagErr) {
+      console.warn("⚠️ [CLIENT] Suppression tag client échouée (non-bloquant):", tagErr);
+    }
+
+    // Supprimer le metafield code_promo du client associé (non-bloquant)
+    if (linkedCustomerId) {
+      try {
+        await deleteCustomerCodePromo(admin, linkedCustomerId);
+      } catch (mfErr) {
+        console.warn("⚠️ [CLIENT] Suppression metafield code_promo échouée (non-bloquant):", mfErr);
+      }
+    }
 
     if (existingDiscountId)
       await deleteShopifyDiscount(admin, existingDiscountId);

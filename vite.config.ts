@@ -55,6 +55,9 @@ export default defineConfig({
   build: {
     assetsInlineLimit: 0,
   },
+  resolve: {
+    dedupe: ["react", "react-dom"],
+  },
   optimizeDeps: {
     include: ["@shopify/app-bridge-react"],
   },
