@@ -174,7 +174,7 @@ export function NavBar() {
     // Sauvegarder côté serveur via fetcher (auth Shopify correcte)
     fetcher.submit(
       { action: "update_config", threshold: String(localThreshold), creditAmount: String(localCreditAmount) },
-      { method: "POST", action: "/app" }
+      { method: "POST", action: "/app?index" }
     );
 
     showToast({
@@ -194,7 +194,7 @@ export function NavBar() {
     // Sauvegarder côté serveur via fetcher (auth Shopify correcte)
     fetcher.submit(
       { action: "update_validation_defaults", value: String(valDefaults.value), type: valDefaults.type, codePrefix: valDefaults.codePrefix },
-      { method: "POST", action: "/app" }
+      { method: "POST", action: "/app?index" }
     );
 
     showToast({ title: "Paramètres sauvegardés", msg: `Valeur ${valDefaults.value}${valDefaults.type} • Code ${valDefaults.codePrefix}`, type: "success" });
