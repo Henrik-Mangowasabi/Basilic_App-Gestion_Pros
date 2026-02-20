@@ -1,11 +1,22 @@
 // FICHIER : app/routes/app.validation.tsx
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import type { ActionFunctionArgs, LoaderFunctionArgs, ShouldRevalidateFunctionArgs } from "react-router";
 import { useLoaderData, useActionData, useSubmit, useNavigation, redirect } from "react-router";
 import { useState, useEffect, useRef } from "react";
 import { authenticate } from "../shopify.server";
 import { createMetaobjectEntry, getMetaobjectEntries } from "../lib/metaobject.server";
 import { updateCustomerInShopify } from "../lib/customer.server";
 import { useEditMode } from "../context/EditModeContext";
+
+// Empêche React Router de re-lancer le loader inutilement (il est lourd)
+// Ne revalide que si une action de CETTE page a été soumise, ou navigation directe
+export function shouldRevalidate({ formAction, defaultShouldRevalidate }: ShouldRevalidateFunctionArgs) {
+  // Revalider seulement si l'action vient de cette route
+  if (formAction && formAction.startsWith("/app/validation")) return true;
+  // Navigation directe vers cette page → revalider
+  if (!formAction) return defaultShouldRevalidate;
+  // Actions d'autres routes (fetcher config, etc.) → ne PAS revalider
+  return false;
+}
 
 // ────────────────────────────────────────────────────────────────────────────────
 // LOADER
@@ -681,7 +692,7 @@ function BulkConfirmModal({
 export default function ValidationPage() {
   const { customers, existingCodes: rawExistingCodes, shopDomain } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
-  const { isLocked, showToast } = useEditMode();
+  const { isLocked, showToast, validationDefaults } = useEditMode();
   const submit = useSubmit();
   const navigation = useNavigation();
 
@@ -694,21 +705,12 @@ export default function ValidationPage() {
   const [editValue, setEditValue] = useState("");
   const [processingCustomerId, setProcessingCustomerId] = useState<string | null>(null);
 
-  const [defaultSettings, setDefaultSettings] = useState({
-    value: 5,
-    type: "%",
-    codePrefix: "PRO_",
-  });
+  const [defaultSettings, setDefaultSettings] = useState(validationDefaults);
 
-  // Load from localStorage
+  // Sync from context when server data arrives
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem("validation_defaults");
-      if (stored) setDefaultSettings(JSON.parse(stored));
-    } catch (e) {
-      console.error("Error loading settings:", e);
-    }
-  }, []);
+    setDefaultSettings(validationDefaults);
+  }, [validationDefaults.value, validationDefaults.type, validationDefaults.codePrefix]);
 
   // Store validation count for navbar badge
   useEffect(() => {

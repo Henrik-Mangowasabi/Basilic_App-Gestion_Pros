@@ -25,7 +25,7 @@ import {
 } from "../lib/metaobject.server";
 import { createCustomerMetafieldDefinitions } from "../lib/customer.server";
 
-import { getShopConfig, saveShopConfig } from "../config.server";
+import { getShopConfig, saveShopConfig, getValidationDefaults, saveValidationDefaults } from "../config.server";
 import * as XLSX from "xlsx";
 
 // --- LOADER ---
@@ -34,7 +34,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const shopDomain = session.shop;
   const status = await checkMetaobjectStatus(admin);
 
-  const config = await getShopConfig(admin);
+  const [config, validationDefaults] = await Promise.all([
+    getShopConfig(admin),
+    getValidationDefaults(admin),
+  ]);
 
   let entries: Array<{
     id: string;
@@ -116,7 +119,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     // Pas besoin de requêter toutes les commandes à chaque chargement de page.
   }
 
-  return { status, entries, config, shopDomain };
+  return { status, entries, config, validationDefaults, shopDomain };
 };
 
 // --- ACTION ---
@@ -190,6 +193,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const creditAmount = parseFloat(formData.get("creditAmount") as string);
     await saveShopConfig(admin, { threshold, creditAmount });
     return { success: "config_saved", threshold, creditAmount };
+  }
+
+  if (actionType === "update_validation_defaults") {
+    const value = parseFloat(formData.get("value") as string);
+    const type = (formData.get("type") as string) || "%";
+    const codePrefix = (formData.get("codePrefix") as string) || "PRO_";
+    await saveValidationDefaults(admin, { value, type, codePrefix });
+    return { success: "validation_defaults_saved" };
   }
 
   if (actionType === "update_entry") {
@@ -1153,6 +1164,7 @@ function PartnerModal({ mode, entry, onClose, entries }: { mode: "create" | "edi
   const dialogRef = useRef<HTMLDivElement>(null);
   useFocusTrap(dialogRef, true, onClose);
   const [searchParams] = useSearchParams();
+  const { validationDefaults: ctxValDefaults } = useEditMode();
 
   // Load validation defaults for auto-code generation
   const getInitialFormData = () => {
@@ -1170,15 +1182,9 @@ function PartnerModal({ mode, entry, onClose, entries }: { mode: "create" | "edi
       };
     }
 
-    // For new partners, load defaults and auto-generate code
-    let valDefaults = { value: 5, type: "%", codePrefix: "PRO_" };
-    try {
-      const stored = localStorage.getItem("validation_defaults");
-      if (stored) valDefaults = JSON.parse(stored);
-    } catch {}
-
+    // For new partners, use context defaults and auto-generate code
     const existingCodes = new Set((entries || []).map((e: any) => e.code));
-    const autoCode = generatePromoCode("", "", valDefaults.codePrefix, existingCodes);
+    const autoCode = generatePromoCode("", "", ctxValDefaults.codePrefix, existingCodes);
 
     return {
       identification: "",
@@ -1186,8 +1192,8 @@ function PartnerModal({ mode, entry, onClose, entries }: { mode: "create" | "edi
       last_name: "",
       email: "",
       code: autoCode,
-      montant: String(valDefaults.value),
-      type: valDefaults.type,
+      montant: String(ctxValDefaults.value),
+      type: ctxValDefaults.type,
       profession: "",
       adresse: "",
     };
@@ -1208,20 +1214,14 @@ function PartnerModal({ mode, entry, onClose, entries }: { mode: "create" | "edi
   // Auto-regenerate code when name changes (only for new partners and if not manually edited)
   useEffect(() => {
     if (!isEdit && !hasManuallyEditedCode && (fd.first_name || fd.last_name)) {
-      let valDefaults = { value: 5, type: "%", codePrefix: "PRO_" };
-      try {
-        const stored = localStorage.getItem("validation_defaults");
-        if (stored) valDefaults = JSON.parse(stored);
-      } catch {}
-
       const existingCodes = new Set((entries || []).map((e: any) => e.code));
-      const newCode = generatePromoCode(fd.first_name, fd.last_name, valDefaults.codePrefix, existingCodes);
+      const newCode = generatePromoCode(fd.first_name, fd.last_name, ctxValDefaults.codePrefix, existingCodes);
 
       if (newCode !== fd.code) {
         setFd((prev) => ({ ...prev, code: newCode }));
       }
     }
-  }, [fd.first_name, fd.last_name, isEdit, entries, fd.code, hasManuallyEditedCode]);
+  }, [fd.first_name, fd.last_name, isEdit, entries, fd.code, hasManuallyEditedCode, ctxValDefaults.codePrefix]);
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
@@ -1406,7 +1406,7 @@ function exportToExcel(entries: Array<{
 
 // --- PAGE PRINCIPALE ---
 export default function Index() {
-  const { status, entries, config: serverConfig, shopDomain } = useLoaderData<typeof loader>();
+  const { status, entries, config: serverConfig, validationDefaults: serverValDefaults, shopDomain } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const [searchParams, setSearchParams] = useSearchParams();
   const nav = useNavigation();
@@ -1422,7 +1422,7 @@ export default function Index() {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [sortConfig, setSortConfig] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
-  const { showCodeBlock, setShowCodeBlock, showCABlock, setShowCABlock, isLocked, showToast, setConfig } = useEditMode();
+  const { showCodeBlock, setShowCodeBlock, showCABlock, setShowCABlock, isLocked, showToast, setConfig, setValidationDefaults } = useEditMode();
 
   // Synchroniser le config serveur vers le context client (au chargement de la page)
   useEffect(() => {
@@ -1430,6 +1430,13 @@ export default function Index() {
       setConfig({ threshold: serverConfig.threshold, creditAmount: serverConfig.creditAmount });
     }
   }, [serverConfig?.threshold, serverConfig?.creditAmount]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Synchroniser les validation defaults serveur vers le context client
+  useEffect(() => {
+    if (serverValDefaults) {
+      setValidationDefaults(serverValDefaults);
+    }
+  }, [serverValDefaults?.value, serverValDefaults?.type, serverValDefaults?.codePrefix]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSort = (key: string) => {
     const labels: Record<string, string> = { name: "Nom", profession: "Profession", status: "État", orders: "Commandes", revenue: "CA généré" };

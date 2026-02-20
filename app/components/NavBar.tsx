@@ -1,5 +1,5 @@
 // FICHIER : app/components/NavBar.tsx
-import { NavLink, useNavigate, useLocation } from "react-router";
+import { NavLink, useNavigate, useLocation, useFetcher } from "react-router";
 import { useRef, useEffect, useState } from "react";
 import { useEditMode } from "../context/EditModeContext";
 
@@ -120,11 +120,14 @@ export function NavBar() {
     setShowCABlock,
     config,
     setConfig,
+    validationDefaults,
+    setValidationDefaults,
     showToast,
   } = useEditMode();
 
   const navigate = useNavigate();
   const location = useLocation();
+  const fetcher = useFetcher();
   const onAppPage = location.pathname === "/app";
 
   const [showConfigPanel, setShowConfigPanel] = useState(false);
@@ -133,15 +136,13 @@ export function NavBar() {
 
   // Validation defaults
   const [showValidationPanel, setShowValidationPanel] = useState(false);
-  const [valDefaults, setValDefaults] = useState({ value: 5, type: "%", codePrefix: "PRO_" });
+  const [valDefaults, setValDefaults] = useState(validationDefaults);
   const [validationCount, setValidationCount] = useState(0);
 
+  // Sync valDefaults quand le context est mis à jour par le serveur
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem("validation_defaults");
-      if (stored) setValDefaults(JSON.parse(stored));
-    } catch {}
-  }, []);
+    setValDefaults(validationDefaults);
+  }, [validationDefaults.value, validationDefaults.type, validationDefaults.codePrefix]);
 
   useEffect(() => {
     const updateValidationCount = () => {
@@ -163,49 +164,40 @@ export function NavBar() {
     setLocalCreditAmount(config.creditAmount);
   }, [config.threshold, config.creditAmount]);
 
-  const handleSaveConfig = async (e: { preventDefault: () => void }) => {
+  const handleSaveConfig = (e: { preventDefault: () => void }) => {
     e.preventDefault();
 
     // Mise à jour immédiate côté client pour feedback instantané
     setConfig({ threshold: localThreshold, creditAmount: localCreditAmount });
     setShowConfigPanel(false);
 
-    // Sauvegarder côté serveur
-    try {
-      const formData = new FormData();
-      formData.append("action", "update_config");
-      formData.append("threshold", String(localThreshold));
-      formData.append("creditAmount", String(localCreditAmount));
+    // Sauvegarder côté serveur via fetcher (auth Shopify correcte)
+    fetcher.submit(
+      { action: "update_config", threshold: String(localThreshold), creditAmount: String(localCreditAmount) },
+      { method: "POST", action: "/app" }
+    );
 
-      await fetch("/app", {
-        method: "POST",
-        body: formData
-      });
-
-      showToast({
-        title: "Réglages sauvegardés",
-        msg: `${localCreditAmount}€ tous les ${localThreshold}€ de CA. Synchronisé avec le serveur!`,
-        type: "success"
-      });
-    } catch (error) {
-      console.error("Erreur sauvegarde config:", error);
-      showToast({
-        title: "Erreur",
-        msg: "Impossible de sauvegarder sur le serveur",
-        type: "error"
-      });
-    }
+    showToast({
+      title: "Réglages sauvegardés",
+      msg: `${localCreditAmount}€ tous les ${localThreshold}€ de CA.`,
+      type: "success"
+    });
   };
 
   const handleSaveValidationDefaults = (e: { preventDefault: () => void }) => {
     e.preventDefault();
-    try {
-      localStorage.setItem("validation_defaults", JSON.stringify(valDefaults));
-      setShowValidationPanel(false);
-      showToast({ title: "Paramètres sauvegardés", msg: `Valeur ${valDefaults.value}${valDefaults.type} • Code ${valDefaults.codePrefix}`, type: "success" });
-    } catch {
-      showToast({ title: "Erreur", msg: "Impossible de sauvegarder les paramètres.", type: "error" });
-    }
+
+    // Mise à jour immédiate côté client
+    setValidationDefaults(valDefaults);
+    setShowValidationPanel(false);
+
+    // Sauvegarder côté serveur via fetcher (auth Shopify correcte)
+    fetcher.submit(
+      { action: "update_validation_defaults", value: String(valDefaults.value), type: valDefaults.type, codePrefix: valDefaults.codePrefix },
+      { method: "POST", action: "/app" }
+    );
+
+    showToast({ title: "Paramètres sauvegardés", msg: `Valeur ${valDefaults.value}${valDefaults.type} • Code ${valDefaults.codePrefix}`, type: "success" });
   };
 
   const toggleConfigPanel = () => {
