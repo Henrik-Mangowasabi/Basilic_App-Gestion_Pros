@@ -19,32 +19,23 @@ export const loader = async (_args: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  // Filtrer les webhooks d'autres shops (vieux retries d'un autre store)
   const shop = request.headers.get("X-Shopify-Shop-Domain") || "";
-  const expectedShop = (process.env.SHOPIFY_APP_URL || "")
-    .replace("https://", "")
-    .replace("http://", "")
-    .split(".")[0]; // extrait le nom du service Render
-  // On vérifie via le HMAC plutôt que le nom du shop (plus fiable)
-
-  console.log(`🚨 ===== WEBHOOK ORDERS/CREATE APPELÉ (${shop}) =====`);
 
   // 1. Lire le body brut AVANT tout traitement (crucial pour le HMAC)
   const rawBody = await request.text();
   const hmacHeader = request.headers.get("X-Shopify-Hmac-Sha256") || "";
   const topic = request.headers.get("X-Shopify-Topic") || "";
 
-  // 2. Validation HMAC manuelle (remplace authenticate.webhook qui pose problème)
+  // 2. Validation HMAC manuelle
   const secret = process.env.SHOPIFY_API_SECRET?.trim() || "";
   const computedHmac = createHmac("sha256", secret).update(rawBody, "utf8").digest("base64");
-  const hmacValid = computedHmac === hmacHeader;
-
-  if (!hmacValid) {
+  if (computedHmac !== hmacHeader) {
     // HMAC invalide = webhook d'un autre store ou requête non autorisée → ignorer silencieusement
     return new Response("OK", { status: 200 });
   }
 
-  console.log(`✅ HMAC validé pour ${shop}`);
+  console.log(`🚨 ===== WEBHOOK ORDERS/CREATE (${shop}) =====`);
+  console.log(`✅ HMAC validé`);
 
   // 3. Parser le payload
   let payload: any;
