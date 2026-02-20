@@ -46,7 +46,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return new Response("Invalid JSON", { status: 200 });
   }
 
-  console.log(`📥 Webhook reçu - Shop: ${shop}, Topic: ${topic}, HMAC: ${hmacValid ? "VALIDE" : "BYPASS"}`);
+  console.log(`📥 Webhook reçu - Shop: ${shop}, Topic: ${topic}`);
 
   // 4. Récupérer un admin context via session stockée
   let adminContext: any;
