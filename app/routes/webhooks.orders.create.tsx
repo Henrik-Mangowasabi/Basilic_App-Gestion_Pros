@@ -1,5 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { authenticate } from "../shopify.server";
+import { createHmac } from "crypto";
+import { unauthenticated } from "../shopify.server";
 import { getShopConfig } from "../config.server";
 import { updateCustomerProMetafields } from "../lib/customer.server";
 
@@ -7,56 +8,65 @@ import { updateCustomerProMetafields } from "../lib/customer.server";
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export const loader = async (_args: LoaderFunctionArgs) => {
   console.log(`ℹ️ Requête GET reçue sur le webhook orders/create. Ceci est normal pour un test de connectivité.`);
-  return new Response(JSON.stringify({ 
-    message: "Webhook orders/create endpoint", 
+  return new Response(JSON.stringify({
+    message: "Webhook orders/create endpoint",
     method: "Use POST to trigger webhook",
-    registered: true 
-  }), { 
-    status: 200, 
-    headers: { "Content-Type": "application/json" } 
+    registered: true
+  }), {
+    status: 200,
+    headers: { "Content-Type": "application/json" }
   });
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  // Log IMMÉDIAT pour voir si la route est appelée
-  console.log(`🚨 ===== WEBHOOK ORDERS/CREATE APPELÉ =====`);
-  
-  try {
-    const { admin, payload, shop, session, topic } = await authenticate.webhook(request);
+  const shop = request.headers.get("X-Shopify-Shop-Domain") || "";
 
-    // IMPORTANT: Récupérer la config depuis les shop metafields (pas les env vars hardcodées)
-    const config = await getShopConfig(admin);
+  // 1. Lire le body brut AVANT tout traitement (crucial pour le HMAC)
+  const rawBody = await request.text();
+  const hmacHeader = request.headers.get("X-Shopify-Hmac-Sha256") || "";
+  const topic = request.headers.get("X-Shopify-Topic") || "";
+
+  // 2. Validation HMAC manuelle
+  const secret = process.env.SHOPIFY_API_SECRET?.trim() || "";
+  const computedHmac = createHmac("sha256", secret).update(rawBody, "utf8").digest("base64");
+  if (computedHmac !== hmacHeader) {
+    // HMAC invalide = webhook d'un autre store ou requête non autorisée → ignorer silencieusement
+    return new Response("OK", { status: 200 });
+  }
+
+  console.log(`🚨 ===== WEBHOOK ORDERS/CREATE (${shop}) =====`);
+  console.log(`✅ HMAC validé`);
+
+  // 3. Parser le payload
+  let payload: any;
+  try {
+    payload = JSON.parse(rawBody);
+  } catch {
+    console.error(`❌ Body n'est pas du JSON valide !`);
+    return new Response("Invalid JSON", { status: 200 });
+  }
+
+  console.log(`📥 Webhook reçu - Shop: ${shop}, Topic: ${topic}`);
+
+  // 4. Récupérer un admin context via session stockée
+  let adminContext: any;
+  try {
+    const { admin } = await unauthenticated.admin(shop);
+    adminContext = admin;
+    console.log(`✅ Admin récupéré via unauthenticated.admin`);
+  } catch (unauthError) {
+    console.error(`❌ unauthenticated.admin échoué:`, unauthError);
+    console.log(`⛔ Pas de session admin pour ${shop}. Retour 200 pour stopper les retries.`);
+    console.log(`💡 Ouvre l'app dans l'admin Shopify pour créer une session, puis réessaie.`);
+    return new Response(JSON.stringify({ error: "No admin session" }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    });
+  }
+
+    // IMPORTANT: Récupérer la config depuis les shop metafields
+    const config = await getShopConfig(adminContext);
     console.log(`⚙️ Config utilisée - Seuil: ${config.threshold}€, Crédit: ${config.creditAmount}€`);
-    
-    console.log(`📥 Webhook reçu - Shop: ${shop}, Topic: ${topic}, Session: ${session ? "Oui" : "Non"}, Admin: ${admin ? "Oui" : "Non"}`);
-    
-    // Si admin n'est pas disponible, essayer de le récupérer depuis la session
-    let adminContext = admin;
-    if (!adminContext && session) {
-      console.log(`🔄 Tentative de récupération de l'admin depuis la session...`);
-      try {
-        const { admin: adminFromSession } = await authenticate.admin(request);
-        adminContext = adminFromSession;
-        console.log(`✅ Admin récupéré depuis la session`);
-      } catch (error) {
-        console.error(`❌ Erreur lors de la récupération de l'admin:`, error);
-      }
-    }
-    
-    if (!adminContext) {
-      console.error("❌ Webhook: admin non disponible - Shop:", shop, "Session:", session?.id);
-      console.error("⚠️ SOLUTION: L'application doit être réinstallée sur cette boutique pour créer une session valide.");
-      console.error("⚠️ Allez dans le Shopify Partners Dashboard > Apps > Votre app > Boutiques > Réinstaller");
-      // Retourner 200 pour éviter que Shopify réessaie indéfiniment
-      return new Response(JSON.stringify({ 
-        error: "Admin non disponible",
-        message: "L'application doit être réinstallée sur cette boutique pour créer une session valide.",
-        shop: shop
-      }), { 
-        status: 200, 
-        headers: { "Content-Type": "application/json" } 
-      });
-    }
 
   const order = payload as any;
   
@@ -508,16 +518,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     console.log("ℹ️ Aucun code promo détecté dans cette commande, webhook ignoré");
   }
 
-  return new Response(JSON.stringify({ success: true }), { 
-    status: 200, 
-    headers: { "Content-Type": "application/json" } 
+  return new Response(JSON.stringify({ success: true }), {
+    status: 200,
+    headers: { "Content-Type": "application/json" }
   });
-  } catch (error) {
-    // Erreur d'authentification du webhook (HMAC invalide, etc.)
-    console.error("❌ Erreur authentification webhook:", error);
-    return new Response(JSON.stringify({ error: "Erreur authentification" }), { 
-      status: 401, 
-      headers: { "Content-Type": "application/json" } 
-    });
-  }
 };

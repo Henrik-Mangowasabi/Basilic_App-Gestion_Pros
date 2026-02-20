@@ -3,6 +3,7 @@ import { createContext, useContext, useState, useCallback, useEffect } from "rea
 import type { ReactNode } from "react";
 
 export type ToastData = { title: string; msg: string; type: "success" | "error" | "info" };
+export type ValidationDefaults = { value: number; type: string; codePrefix: string };
 
 type EditModeContextType = {
   isLocked: boolean;
@@ -19,6 +20,8 @@ type EditModeContextType = {
   setShowCABlock: (v: boolean) => void;
   config: { threshold: number; creditAmount: number };
   setConfig: (v: { threshold: number; creditAmount: number }) => void;
+  validationDefaults: ValidationDefaults;
+  setValidationDefaults: (v: ValidationDefaults) => void;
   toast: ToastData | null;
   showToast: (t: ToastData) => void;
   dismissToast: () => void;
@@ -34,18 +37,14 @@ export function EditModeProvider({ children }: { children: ReactNode }) {
   const [showCodeBlock, setShowCodeBlock] = useState(true);
   const [showCABlock, setShowCABlock] = useState(false);
   const [config, setConfigState] = useState({ threshold: 500, creditAmount: 10 });
-
-  // Lecture localStorage APRÈS hydratation (évite le mismatch SSR/client React 18)
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem("basilic_config");
-      if (stored) setConfigState(JSON.parse(stored));
-    } catch {}
-  }, []);
+  const [validationDefaults, setValidationDefaultsState] = useState<ValidationDefaults>({ value: 5, type: "%", codePrefix: "PRO_" });
 
   const setConfig = useCallback((v: { threshold: number; creditAmount: number }) => {
     setConfigState(v);
-    try { localStorage.setItem("basilic_config", JSON.stringify(v)); } catch {}
+  }, []);
+
+  const setValidationDefaults = useCallback((v: ValidationDefaults) => {
+    setValidationDefaultsState(v);
   }, []);
   const [toast, setToast] = useState<ToastData | null>(null);
 
@@ -88,6 +87,8 @@ export function EditModeProvider({ children }: { children: ReactNode }) {
         setShowCABlock,
         config,
         setConfig,
+        validationDefaults,
+        setValidationDefaults,
         toast,
         showToast,
         dismissToast,
