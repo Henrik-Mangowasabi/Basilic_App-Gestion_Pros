@@ -80,6 +80,11 @@ export async function migrateMetaobjectDefinition(admin: AdminApiContext) {
 
     console.log(`[MIGRATE] Ajout de ${toAdd.length} champ(s) à la définition:`, toAdd.map(f => f.key));
 
+    // API 2025-10 utilise fieldDefinitions avec { create: { ... } } au lieu de addFieldDefinitions
+    const fieldDefinitionsOps = toAdd.map(f => ({
+      create: { name: f.name, key: f.key, type: f.type },
+    }));
+
     const mutation = `mutation metaobjectDefinitionUpdate($id: ID!, $definition: MetaobjectDefinitionUpdateInput!) {
       metaobjectDefinitionUpdate(id: $id, definition: $definition) {
         metaobjectDefinition { id }
@@ -87,7 +92,7 @@ export async function migrateMetaobjectDefinition(admin: AdminApiContext) {
       }
     }`;
     const mr = await admin.graphql(mutation, {
-      variables: { id: defNode.id, definition: { addFieldDefinitions: toAdd } },
+      variables: { id: defNode.id, definition: { fieldDefinitions: fieldDefinitionsOps } },
     });
     const md = (await mr.json()) as any;
     if (md.data?.metaobjectDefinitionUpdate?.userErrors?.length > 0) {
