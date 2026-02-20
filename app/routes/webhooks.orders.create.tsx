@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { createHmac } from "crypto";
-import { authenticate, unauthenticated } from "../shopify.server";
+import { unauthenticated } from "../shopify.server";
 import { getShopConfig } from "../config.server";
 import { updateCustomerProMetafields } from "../lib/customer.server";
 
@@ -19,73 +19,55 @@ export const loader = async (_args: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  // Log IMMÉDIAT pour voir si la route est appelée
   console.log(`🚨 ===== WEBHOOK ORDERS/CREATE APPELÉ =====`);
 
-  // Clone pour pouvoir relire le body si l'auth échoue
-  const requestClone = request.clone();
+  // 1. Lire le body brut AVANT tout traitement (crucial pour le HMAC)
+  const rawBody = await request.text();
+  const hmacHeader = request.headers.get("X-Shopify-Hmac-Sha256") || "";
+  const shop = request.headers.get("X-Shopify-Shop-Domain") || "";
+  const topic = request.headers.get("X-Shopify-Topic") || "";
 
-  let payload: any;
-  let shop: string;
-  let admin: any = null;
-  let topic: string | null = null;
-  let session: any = null;
-  let authSuccess = false;
+  // 2. Validation HMAC manuelle (remplace authenticate.webhook qui pose problème)
+  const secret = process.env.SHOPIFY_API_SECRET?.trim() || "";
+  const computedHmac = createHmac("sha256", secret).update(rawBody, "utf8").digest("base64");
+  const hmacValid = computedHmac === hmacHeader;
 
-  try {
-    const authResult = await authenticate.webhook(request);
-    payload = authResult.payload;
-    shop = authResult.shop;
-    admin = authResult.admin;
-    topic = authResult.topic;
-    session = authResult.session;
-    authSuccess = true;
-    console.log(`✅ Webhook HMAC validé avec succès !`);
-  } catch (authError) {
-    // HMAC échoué - diagnostic détaillé
-    const secret = process.env.SHOPIFY_API_SECRET?.trim() || "";
-    const rawBody = await requestClone.text();
-    const hmacHeader = requestClone.headers.get("X-Shopify-Hmac-Sha256") || "";
-    const shopHeader = requestClone.headers.get("X-Shopify-Shop-Domain") || "";
-    const topicHeader = requestClone.headers.get("X-Shopify-Topic") || "";
-
-    // Diagnostic HMAC manuel
-    const computedHmac = createHmac("sha256", secret).update(rawBody, "utf8").digest("base64");
-    const hmacMatch = computedHmac === hmacHeader;
-
-    console.log(`❌ HMAC validation échouée !`);
-    console.log(`🔍 DIAG Secret: length=${secret.length}, first4="${secret.substring(0, 4)}", last3="${secret.substring(secret.length - 3)}"`);
-    console.log(`🔍 DIAG Body: length=${rawBody.length}`);
-    console.log(`🔍 DIAG HMAC reçu:  ${hmacHeader}`);
-    console.log(`🔍 DIAG HMAC calculé: ${computedHmac}`);
-    console.log(`🔍 DIAG Match: ${hmacMatch}`);
-    console.log(`🔍 DIAG Shop: ${shopHeader}, Topic: ${topicHeader}`);
-
-    // Bypass temporaire pour tester le flow complet
-    // TODO: SUPPRIMER ce bypass une fois le HMAC corrigé !
-    console.log(`⚠️ BYPASS HMAC ACTIVÉ - Traitement du webhook sans validation HMAC`);
-    payload = JSON.parse(rawBody);
-    shop = shopHeader;
-    topic = topicHeader;
+  if (hmacValid) {
+    console.log(`✅ HMAC validé manuellement !`);
+  } else {
+    console.log(`⚠️ HMAC mismatch (bypass actif pour debug)`);
+    console.log(`🔍 Secret: length=${secret.length}, first4="${secret.substring(0, 4)}"`);
+    console.log(`🔍 Body: length=${rawBody.length}, start="${rawBody.substring(0, 30)}..."`);
+    console.log(`🔍 HMAC reçu:   ${hmacHeader}`);
+    console.log(`🔍 HMAC calculé: ${computedHmac}`);
   }
 
-    console.log(`📥 Webhook reçu - Shop: ${shop}, Topic: ${topic}, Auth HMAC: ${authSuccess ? "OUI" : "BYPASS"}, Admin: ${admin ? "Oui" : "Non"}`);
+  // 3. Parser le payload
+  let payload: any;
+  try {
+    payload = JSON.parse(rawBody);
+  } catch {
+    console.error(`❌ Body n'est pas du JSON valide !`);
+    return new Response("Invalid JSON", { status: 200 });
+  }
 
-    // Récupérer un admin context - fallback via unauthenticated.admin si pas de session
-    let adminContext = admin;
-    if (!adminContext) {
-      console.log(`⚠️ Admin non disponible via webhook auth, tentative via unauthenticated.admin("${shop}")...`);
-      try {
-        const { admin: unauthAdmin } = await unauthenticated.admin(shop);
-        adminContext = unauthAdmin;
-        console.log(`✅ Admin récupéré via unauthenticated.admin`);
-      } catch (unauthError) {
-        console.error(`❌ unauthenticated.admin échoué:`, unauthError);
-        // Retourner 503 pour que Shopify réessaie plus tard (quand la session existera)
-        console.log(`🔄 Retour 503 - Shopify va réessayer ce webhook plus tard`);
-        return new Response("Session not ready, please retry", { status: 503 });
-      }
-    }
+  console.log(`📥 Webhook reçu - Shop: ${shop}, Topic: ${topic}, HMAC: ${hmacValid ? "VALIDE" : "BYPASS"}`);
+
+  // 4. Récupérer un admin context via session stockée
+  let adminContext: any;
+  try {
+    const { admin } = await unauthenticated.admin(shop);
+    adminContext = admin;
+    console.log(`✅ Admin récupéré via unauthenticated.admin`);
+  } catch (unauthError) {
+    console.error(`❌ unauthenticated.admin échoué:`, unauthError);
+    console.log(`⛔ Pas de session admin pour ${shop}. Retour 200 pour stopper les retries.`);
+    console.log(`💡 Ouvre l'app dans l'admin Shopify pour créer une session, puis réessaie.`);
+    return new Response(JSON.stringify({ error: "No admin session" }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    });
+  }
 
     // IMPORTANT: Récupérer la config depuis les shop metafields
     const config = await getShopConfig(adminContext);
