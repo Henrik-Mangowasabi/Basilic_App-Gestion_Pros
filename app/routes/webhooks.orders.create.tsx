@@ -19,12 +19,19 @@ export const loader = async (_args: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  console.log(`🚨 ===== WEBHOOK ORDERS/CREATE APPELÉ =====`);
+  // Filtrer les webhooks d'autres shops (vieux retries d'un autre store)
+  const shop = request.headers.get("X-Shopify-Shop-Domain") || "";
+  const expectedShop = (process.env.SHOPIFY_APP_URL || "")
+    .replace("https://", "")
+    .replace("http://", "")
+    .split(".")[0]; // extrait le nom du service Render
+  // On vérifie via le HMAC plutôt que le nom du shop (plus fiable)
+
+  console.log(`🚨 ===== WEBHOOK ORDERS/CREATE APPELÉ (${shop}) =====`);
 
   // 1. Lire le body brut AVANT tout traitement (crucial pour le HMAC)
   const rawBody = await request.text();
   const hmacHeader = request.headers.get("X-Shopify-Hmac-Sha256") || "";
-  const shop = request.headers.get("X-Shopify-Shop-Domain") || "";
   const topic = request.headers.get("X-Shopify-Topic") || "";
 
   // 2. Validation HMAC manuelle (remplace authenticate.webhook qui pose problème)
@@ -32,15 +39,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const computedHmac = createHmac("sha256", secret).update(rawBody, "utf8").digest("base64");
   const hmacValid = computedHmac === hmacHeader;
 
-  if (hmacValid) {
-    console.log(`✅ HMAC validé manuellement !`);
-  } else {
-    console.log(`⚠️ HMAC mismatch (bypass actif pour debug)`);
-    console.log(`🔍 Secret: length=${secret.length}, first4="${secret.substring(0, 4)}"`);
-    console.log(`🔍 Body: length=${rawBody.length}, start="${rawBody.substring(0, 30)}..."`);
-    console.log(`🔍 HMAC reçu:   ${hmacHeader}`);
-    console.log(`🔍 HMAC calculé: ${computedHmac}`);
+  if (!hmacValid) {
+    // HMAC invalide = webhook d'un autre store ou requête non autorisée → ignorer silencieusement
+    return new Response("OK", { status: 200 });
   }
+
+  console.log(`✅ HMAC validé pour ${shop}`);
 
   // 3. Parser le payload
   let payload: any;
