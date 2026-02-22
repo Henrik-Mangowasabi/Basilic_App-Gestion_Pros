@@ -1,30 +1,26 @@
-import { Page, Layout, Card, Text } from "@shopify/polaris";
+import { Page, Layout, Card, Text, Button } from "@shopify/polaris";
 
 export function ErrorDisplay({ error }: { error: unknown }) {
-  let detail = "Une erreur est survenue";
+  let detail = "Une erreur est survenue. Veuillez réessayer.";
   if (error instanceof Error) {
-    detail = `${error.name}: ${error.message}`;
+    detail = error.message || detail;
   } else if (error instanceof Response) {
-    detail = `Response ${error.status} ${error.statusText} — URL: ${error.url}`;
+    detail = `Erreur ${error.status} — veuillez recharger la page.`;
   } else if (typeof error === "string") {
     detail = error;
-  } else {
-    try { detail = JSON.stringify(error); } catch { detail = String(error); }
   }
 
   return (
-    <Page title="Erreur">
+    <Page title="Une erreur est survenue">
       <Layout>
         <Layout.Section>
           <Card>
             <Text as="p" variant="bodyMd" tone="critical">
               {detail}
             </Text>
-            {error instanceof Error && error.stack && (
-              <Text as="p" variant="bodySm" tone="subdued">
-                {error.stack.slice(0, 500)}
-              </Text>
-            )}
+            <div style={{ marginTop: "16px" }}>
+              <Button onClick={() => window.location.reload()}>Recharger la page</Button>
+            </div>
           </Card>
         </Layout.Section>
       </Layout>

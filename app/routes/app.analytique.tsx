@@ -1,4 +1,4 @@
-import type { LoaderFunctionArgs } from "react-router";
+import type { LoaderFunctionArgs, ShouldRevalidateFunctionArgs, ClientLoaderFunctionArgs } from "react-router";
 import { useLoaderData, Link, Form, useNavigate } from "react-router";
 import { useState, useEffect, useRef } from "react";
 import { authenticate } from "../shopify.server";
@@ -7,6 +7,28 @@ import {
   checkMetaobjectStatus,
 } from "../lib/metaobject.server";
 import { Pagination } from "../components/Pagination";
+
+export function shouldRevalidate({ formAction, defaultShouldRevalidate }: ShouldRevalidateFunctionArgs) {
+  if (formAction && formAction.startsWith("/app/analytique")) return true;
+  if (!formAction) return defaultShouldRevalidate;
+  return false;
+}
+
+// Cache en mémoire : vit dans la session JS (effacé au refresh / fermeture d'onglet)
+let analytiqueCache: Awaited<ReturnType<typeof loader>> | null = null;
+
+export async function clientLoader({ serverLoader, request }: ClientLoaderFunctionArgs) {
+  // Si la page a des filtres URL, on ne cache pas (données dynamiques)
+  const url = new URL(request.url);
+  const hasFilters = url.searchParams.has("startDate") || url.searchParams.has("endDate") || url.searchParams.has("profession");
+  if (!hasFilters && analytiqueCache) {
+    return analytiqueCache;
+  }
+  const data = await serverLoader<typeof loader>();
+  if (!hasFilters) analytiqueCache = data;
+  return data;
+}
+clientLoader.hydrate = true;
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
@@ -192,61 +214,22 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       console.error("Erreur filtrage analytique:", e);
     }
   } else {
-    // LOGIQUE PAR DÉFAUT : requête Shopify directe (toutes les commandes)
-    const proStats = new Map<string, { revenue: number; count: number }>();
-
-    try {
-      const allOrdersQuery = `#graphql
-        query getAllOrders($queryString: String!, $cursor: String) {
-          orders(first: 250, query: $queryString, after: $cursor) {
-            edges {
-              node {
-                totalPriceSet { shopMoney { amount } }
-                discountCodes
-              }
-            }
-            pageInfo { hasNextPage endCursor }
-          }
-        }
-      `;
-      const currentYear = new Date().getFullYear();
-      let hasNextPage = true;
-      let cursor = null;
-      while (hasNextPage) {
-        const response = await admin.graphql(allOrdersQuery, { // eslint-disable-line @typescript-eslint/no-explicit-any
-          variables: { queryString: `created_at:>=${currentYear}-01-01 AND discount_code:*`, cursor },
-        });
-        const data = await response.json() as any; // eslint-disable-line @typescript-eslint/no-explicit-any
-        for (const edge of data.data?.orders?.edges || []) {
-          const revenue = parseFloat(edge.node.totalPriceSet.shopMoney.amount);
-          const codesUsed: string[] = edge.node.discountCodes || [];
-          const relevantCodes = codesUsed.filter((c) => allowedCodes.has(c));
-          relevantCodes.forEach((code) => {
-            const cur = proStats.get(code) || { revenue: 0, count: 0 };
-            proStats.set(code, { revenue: cur.revenue + revenue, count: cur.count + 1 });
-            stats.totalRevenue += revenue;
-            stats.totalOrders += 1;
-          });
-        }
-        const pageInfo = data.data?.orders?.pageInfo as any; // eslint-disable-line @typescript-eslint/no-explicit-any
-        hasNextPage = pageInfo?.hasNextPage;
-        cursor = pageInfo?.endCursor;
-      }
-    } catch (e) {
-      console.error("Erreur chargement stats globales:", e);
-    }
-
+    // VUE PAR DÉFAUT : utilisation des données cachées dans les metaobjects
+    // (mises à jour en temps réel par le webhook orders/create — aucun appel API orders nécessaire)
     ranking = profEntriesFiltered
       .map((entry: any) => {
-        const periodData = proStats.get(entry.code) || { revenue: 0, count: 0 };
+        const cachedRevenue = parseFloat(entry.cache_revenue || "0") || 0;
+        const cachedOrders = parseInt(entry.cache_orders_count || "0") || 0;
+        stats.totalRevenue += cachedRevenue;
+        stats.totalOrders += cachedOrders;
         return {
           id: entry.id,
           name: [entry.first_name, entry.last_name].filter(Boolean).join(" ") || entry.name || "Sans nom",
           profession: entry.profession || "-",
           code: entry.code || "-",
           value: entry.montant != null ? `${entry.montant} ${entry.type || "%"}` : "-",
-          revenue: periodData.revenue,
-          ordersCount: periodData.count,
+          revenue: cachedRevenue,
+          ordersCount: cachedOrders,
           customerId: entry.customer_id || null,
         };
       })
@@ -313,8 +296,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   };
 };
 
-// Helper ID - non utilisé pour le moment
-// const extractId = (gid: string) => gid ? gid.split("/").pop() : "";
 
 function RankBadge({ rank }: { rank: number }) {
   if (rank === 1) {

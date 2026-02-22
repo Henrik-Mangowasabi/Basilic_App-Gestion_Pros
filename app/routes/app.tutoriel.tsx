@@ -1,6 +1,12 @@
 // FICHIER : app/routes/app.tutoriel.tsx
-import type { ActionFunctionArgs } from "react-router";
+import type { ActionFunctionArgs, LoaderFunctionArgs, ShouldRevalidateFunctionArgs } from "react-router";
 import { useLoaderData, Form, redirect, useNavigation } from "react-router";
+
+export function shouldRevalidate({ formAction, defaultShouldRevalidate }: ShouldRevalidateFunctionArgs) {
+  if (formAction && formAction.startsWith("/app/tutoriel")) return true;
+  if (!formAction) return defaultShouldRevalidate;
+  return false;
+}
 import { authenticate } from "../shopify.server";
 import { checkMetaobjectStatus, destroyMetaobjectStructure } from "../lib/metaobject.server";
 import { useEditMode } from "../context/EditModeContext";
@@ -14,7 +20,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (actionType === "destroy_structure") {
     const result = await destroyMetaobjectStructure(admin);
     if (result.success) {
-      await new Promise((resolve) => setTimeout(resolve, 2000));
       return redirect("/app?success=structure_deleted");
     }
     return { error: result.error || "Erreur suppression totale" };
@@ -23,7 +28,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   return null;
 };
 
-export const loader = async ({ request }: any) => {
+export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
   const status = await checkMetaobjectStatus(admin);
   return { isInitialized: status.exists };
