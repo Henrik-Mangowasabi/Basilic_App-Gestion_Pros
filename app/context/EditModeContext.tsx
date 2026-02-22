@@ -29,7 +29,7 @@ type EditModeContextType = {
 
 const EditModeContext = createContext<EditModeContextType | null>(null);
 
-export function EditModeProvider({ children }: { children: ReactNode }) {
+export function EditModeProvider({ children, adminPassword }: { children: ReactNode; adminPassword?: string }) {
   const [isLocked, setIsLocked] = useState(true);
   const [showPass, setShowPass] = useState(false);
   const [password, setPassword] = useState("");
@@ -59,8 +59,8 @@ export function EditModeProvider({ children }: { children: ReactNode }) {
   }, [toast]);
 
   const handleUnlock = () => {
-    const adminPassword = "GestionPro";
-    if (password === adminPassword) {
+    const expectedPassword = adminPassword || "GestionPro";
+    if (password === expectedPassword) {
       setIsLocked(false);
       setShowPass(false);
       setPassword("");

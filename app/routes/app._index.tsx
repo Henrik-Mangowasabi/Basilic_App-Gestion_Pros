@@ -1,4 +1,4 @@
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+import type { ActionFunctionArgs, ClientActionFunctionArgs, ClientLoaderFunctionArgs, LoaderFunctionArgs, ShouldRevalidateFunctionArgs } from "react-router";
 import {
   useLoaderData,
   useActionData,
@@ -27,6 +27,12 @@ import { createCustomerMetafieldDefinitions } from "../lib/customer.server";
 
 import { getShopConfig, saveShopConfig, getValidationDefaults, saveValidationDefaults } from "../config.server";
 import * as XLSX from "xlsx";
+
+export function shouldRevalidate({ formAction, defaultShouldRevalidate }: ShouldRevalidateFunctionArgs) {
+  if (formAction && (formAction === "/app" || formAction.startsWith("/app?"))) return true;
+  if (!formAction) return defaultShouldRevalidate;
+  return false;
+}
 
 // --- LOADER ---
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -122,6 +128,22 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   return { status, entries, config, validationDefaults, shopDomain };
 };
 
+// --- CLIENT CACHE (mémoire JS — effacé au refresh / fermeture d'onglet) ---
+let indexCache: Awaited<ReturnType<typeof loader>> | null = null;
+
+export async function clientLoader({ serverLoader }: ClientLoaderFunctionArgs) {
+  if (indexCache) return indexCache;
+  const data = await serverLoader<typeof loader>();
+  indexCache = data;
+  return data;
+}
+clientLoader.hydrate = true;
+
+export async function clientAction({ serverAction }: ClientActionFunctionArgs) {
+  indexCache = null; // Invalide le cache après toute mutation
+  return serverAction<typeof action>();
+}
+
 // --- ACTION ---
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
@@ -191,6 +213,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (actionType === "update_config") {
     const threshold = parseFloat(formData.get("threshold") as string);
     const creditAmount = parseFloat(formData.get("creditAmount") as string);
+    if (isNaN(threshold) || isNaN(creditAmount) || threshold <= 0 || creditAmount <= 0) {
+      return { error: "Valeurs invalides pour le seuil ou le montant de crédit." };
+    }
     await saveShopConfig(admin, { threshold, creditAmount });
     return { success: "config_saved", threshold, creditAmount };
   }
@@ -199,6 +224,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const value = parseFloat(formData.get("value") as string);
     const type = (formData.get("type") as string) || "%";
     const codePrefix = (formData.get("codePrefix") as string) || "PRO_";
+    if (isNaN(value) || value <= 0) {
+      return { error: "Valeur de réduction invalide." };
+    }
     await saveValidationDefaults(admin, { value, type, codePrefix });
     return { success: "validation_defaults_saved" };
   }
@@ -254,8 +282,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (actionType === "bulk_delete_entries") {
     const idsRaw = formData.get("ids") as string;
     const ids = idsRaw ? idsRaw.split(",").filter(Boolean) : [];
+    const bulkErrors: string[] = [];
     for (const id of ids) {
-      await deleteMetaobjectEntry(admin, id);
+      const result = await deleteMetaobjectEntry(admin, id);
+      if (!result.success) bulkErrors.push(result.error || id);
+    }
+    if (bulkErrors.length > 0) {
+      return { error: `${bulkErrors.length} suppression(s) échouée(s).` };
     }
     const url = new URL(request.url);
     url.searchParams.set("success", "entry_deleted");
@@ -427,7 +460,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             niceError =
               "Format invalide (Sauts de ligne interdits). L'adresse ou la profession doit être sur une seule ligne.";
           }
-          errors.push(`Erreur pour ${name} : ${niceError}`);
+          errors.push(`Erreur pour ${displayName} : ${niceError}`);
         }
       }
 

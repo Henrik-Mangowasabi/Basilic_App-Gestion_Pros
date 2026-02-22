@@ -238,44 +238,54 @@ export async function createMetaobject(admin: AdminApiContext) {
 // --- LECTURE ---
 export async function getMetaobjectEntries(admin: AdminApiContext) {
   const query = `
-    query {
-      metaobjects(first: 250, type: "${METAOBJECT_TYPE}") {
+    query GetMetaobjects($cursor: String) {
+      metaobjects(first: 250, type: "${METAOBJECT_TYPE}", after: $cursor) {
         edges {
           node {
             id
             fields { key value }
           }
         }
+        pageInfo { hasNextPage endCursor }
       }
     }
   `;
+
+  const allEntries: any[] = [];
+  let hasNextPage = true;
+  let cursor: string | null = null;
+
   try {
-    const response = await admin.graphql(query);
-    const data = (await response.json()) as any;
-    const entries =
-      data.data?.metaobjects?.edges
-        ?.map((edge: any) => {
-          const node = edge.node;
-          const entry: any = { id: node.id };
-          node.fields.forEach((f: any) => {
-            if (f.key === "montant")
-              entry[f.key] = f.value ? parseFloat(f.value) : null;
-            else if (f.key === "status") entry[f.key] = f.value === "true";
-            else entry[f.key] = f.value;
-          });
-          if (entry.status === undefined) entry.status = true;
-          // Rétrocompatibilité : si l'ancienne structure a "name" mais pas first_name/last_name
-          if (!entry.first_name && !entry.last_name && entry.name) {
-            const parts = (entry.name as string).trim().split(" ");
-            entry.first_name = parts[0] || "";
-            entry.last_name = parts.slice(1).join(" ") || "";
-          }
-          // Nom complet calculé pour les pages secondaires
-          entry.name = [entry.first_name, entry.last_name].filter(Boolean).join(" ") || entry.name || "";
-          return entry;
-        })
-        .filter(Boolean) || [];
-    return { entries };
+    while (hasNextPage) {
+      const response = await admin.graphql(query, { variables: { cursor } });
+      const data = (await response.json()) as any;
+      const edges = data.data?.metaobjects?.edges || [];
+
+      for (const edge of edges) {
+        const node = edge.node;
+        const entry: any = { id: node.id };
+        node.fields.forEach((f: any) => {
+          if (f.key === "montant")
+            entry[f.key] = f.value ? parseFloat(f.value) : null;
+          else if (f.key === "status") entry[f.key] = f.value === "true";
+          else entry[f.key] = f.value;
+        });
+        if (entry.status === undefined) entry.status = true;
+        // Rétrocompatibilité : si l'ancienne structure a "name" mais pas first_name/last_name
+        if (!entry.first_name && !entry.last_name && entry.name) {
+          const parts = (entry.name as string).trim().split(" ");
+          entry.first_name = parts[0] || "";
+          entry.last_name = parts.slice(1).join(" ") || "";
+        }
+        // Nom complet calculé pour les pages secondaires
+        entry.name = [entry.first_name, entry.last_name].filter(Boolean).join(" ") || entry.name || "";
+        allEntries.push(entry);
+      }
+
+      hasNextPage = !!data.data?.metaobjects?.pageInfo?.hasNextPage;
+      cursor = data.data?.metaobjects?.pageInfo?.endCursor ?? null;
+    }
+    return { entries: allEntries };
   } catch (error) {
     return { entries: [], error: String(error) };
   }

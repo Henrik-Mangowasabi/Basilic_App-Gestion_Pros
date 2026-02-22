@@ -1,5 +1,5 @@
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { Outlet, useLoaderData, useRouteError } from "react-router";
+import { Outlet, useLoaderData, useRouteError, useNavigation } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { AppProvider as ShopifyAppProvider } from "@shopify/shopify-app-react-router/react";
 import { AppProvider as PolarisAppProvider } from "@shopify/polaris";
@@ -13,7 +13,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   await authenticate.admin(request);
 
   // eslint-disable-next-line no-undef
-  return { apiKey: process.env.SHOPIFY_API_KEY || "" };
+  return {
+    apiKey: process.env.SHOPIFY_API_KEY || "",
+    adminPassword: process.env.ADMIN_PASSWORD || "GestionPro",
+  };
 };
 
 function AppInner() {
@@ -57,7 +60,9 @@ function AppInner() {
 }
 
 export default function App() {
-  const { apiKey } = useLoaderData<typeof loader>();
+  const { apiKey, adminPassword } = useLoaderData<typeof loader>();
+  const navigation = useNavigation();
+  const isNavigating = navigation.state === "loading";
 
   return (
     <ShopifyAppProvider embedded apiKey={apiKey}>
@@ -68,9 +73,20 @@ export default function App() {
           <s-link href="/app/validation">Validation Pros</s-link>
           <s-link href="/app/tutoriel">Tutoriel</s-link>
         </s-app-nav>
-        <EditModeProvider>
+        <EditModeProvider adminPassword={adminPassword}>
           <AppInner />
         </EditModeProvider>
+        {isNavigating && (
+          <div className="loading-overlay">
+            <div className="loading-modal">
+              <div className="loading-modal__spinner" />
+              <div className="loading-modal__text">
+                <div className="loading-modal__title">Chargement en cours…</div>
+                <div className="loading-modal__subtitle">Récupération des données Shopify</div>
+              </div>
+            </div>
+          </div>
+        )}
       </PolarisAppProvider>
     </ShopifyAppProvider>
   );

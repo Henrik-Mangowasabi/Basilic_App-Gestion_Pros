@@ -1,5 +1,5 @@
 // FICHIER : app/routes/app.validation.tsx
-import type { ActionFunctionArgs, LoaderFunctionArgs, ShouldRevalidateFunctionArgs } from "react-router";
+import type { ActionFunctionArgs, ClientActionFunctionArgs, ClientLoaderFunctionArgs, LoaderFunctionArgs, ShouldRevalidateFunctionArgs } from "react-router";
 import { useLoaderData, useActionData, useSubmit, useNavigation, redirect } from "react-router";
 import { useState, useEffect, useRef } from "react";
 import { authenticate } from "../shopify.server";
@@ -27,7 +27,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const query = `#graphql
     query getCustomersPending($cursor: String) {
-      customers(first: 250, after: $cursor) {
+      customers(first: 250, query: "metafield_namespace_and_key:custom.pro_en_attente_de_validation", after: $cursor) {
         edges {
           node {
             id
@@ -74,7 +74,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   let pages = 0;
 
   try {
-    while (hasNextPage && pages < 20) {
+    while (hasNextPage && pages < 5) {
       const response = await admin.graphql(query, { // eslint-disable-line @typescript-eslint/no-explicit-any
         variables: { cursor },
       });
@@ -115,6 +115,24 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   return { customers, existingCodes, shopDomain };
 };
+
+// ────────────────────────────────────────────────────────────────────────────────
+// CLIENT CACHE (mémoire JS — effacé au refresh / fermeture d'onglet)
+// ────────────────────────────────────────────────────────────────────────────────
+let validationCache: Awaited<ReturnType<typeof loader>> | null = null;
+
+export async function clientLoader({ serverLoader }: ClientLoaderFunctionArgs) {
+  if (validationCache) return validationCache;
+  const data = await serverLoader<typeof loader>();
+  validationCache = data;
+  return data;
+}
+clientLoader.hydrate = true;
+
+export async function clientAction({ serverAction }: ClientActionFunctionArgs) {
+  validationCache = null; // Invalide le cache après chaque accept/reject
+  return serverAction<typeof action>();
+}
 
 // ────────────────────────────────────────────────────────────────────────────────
 // ACTION
