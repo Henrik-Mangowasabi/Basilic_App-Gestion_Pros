@@ -3,7 +3,7 @@ import type { ActionFunctionArgs, ClientActionFunctionArgs, ClientLoaderFunction
 import { useLoaderData, useActionData, useSubmit, useNavigation, redirect } from "react-router";
 import { useState, useEffect, useRef } from "react";
 import { authenticate } from "../shopify.server";
-import { createMetaobjectEntry, getMetaobjectEntries } from "../lib/metaobject.server";
+import { createMetaobjectEntry, getMetaobjectEntries, migrateMetaobjectDefinition } from "../lib/metaobject.server";
 import { updateCustomerInShopify } from "../lib/customer.server";
 import { useEditMode } from "../context/EditModeContext";
 
@@ -24,6 +24,9 @@ export function shouldRevalidate({ formAction, defaultShouldRevalidate }: Should
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
   const shopDomain = session.shop;
+
+  // Assure que displayNameKey est bien défini sur la définition du métaobjet
+  migrateMetaobjectDefinition(admin).catch(() => {});
 
   const query = `#graphql
     query getCustomersPending($cursor: String) {
