@@ -44,7 +44,7 @@ export async function migrateMetaobjectDefinition(admin: AdminApiContext) {
     // 1. Récupérer l'id de la définition et ses champs actuels
     const query = `query {
       metaobjectDefinitions(first: 250) {
-        edges { node { id type fieldDefinitions { key } } }
+        edges { node { id type displayNameKey fieldDefinitions { key } } }
       }
     }`;
     const r = await admin.graphql(query);
@@ -54,6 +54,7 @@ export async function migrateMetaobjectDefinition(admin: AdminApiContext) {
     )?.node;
     if (!defNode) return;
 
+    console.log(`[MIGRATE] displayNameKey actuel: "${defNode.displayNameKey}"`);
     const existingKeys: string[] = defNode.fieldDefinitions.map((f: any) => f.key);
     const toAdd: any[] = [];
 
@@ -97,9 +98,9 @@ export async function migrateMetaobjectDefinition(admin: AdminApiContext) {
     });
     const md = (await mr.json()) as any;
     if (md.data?.metaobjectDefinitionUpdate?.userErrors?.length > 0) {
-      console.warn("[MIGRATE] Erreurs migration:", md.data.metaobjectDefinitionUpdate.userErrors);
+      console.warn("[MIGRATE] Erreurs migration:", JSON.stringify(md.data.metaobjectDefinitionUpdate.userErrors));
     } else {
-      console.log("[MIGRATE] Migration définition réussie.");
+      console.log("[MIGRATE] Migration réussie. displayNameKey devrait être: identification");
     }
   } catch (e) {
     console.warn("[MIGRATE] Exception migration (non-bloquant):", e);
@@ -373,6 +374,9 @@ export async function createMetaobjectEntry(
     const data = (await response.json()) as any;
 
     if (data.data?.metaobjectCreate?.userErrors?.length > 0) {
+      console.error("[CREATE] metaobjectCreate userErrors:", JSON.stringify(data.data.metaobjectCreate.userErrors));
+      console.error("[CREATE] fieldsInput:", JSON.stringify(fieldsInput));
+      console.error("[CREATE] handle:", handle);
       throw new Error(data.data.metaobjectCreate.userErrors[0].message);
     }
 
