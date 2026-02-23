@@ -41,7 +41,7 @@ export async function checkMetaobjectStatus(admin: AdminApiContext) {
 // --- MIGRATION : Ajoute first_name/last_name si manquants dans la définition ---
 export async function migrateMetaobjectDefinition(admin: AdminApiContext) {
   try {
-    // 1. Récupérer l'id de la définition et ses champs actuels
+    // 1. Récupérer la définition et ses champs
     const query = `query {
       metaobjectDefinitions(first: 250) {
         edges { node { id type displayNameKey fieldDefinitions { key } } }
@@ -55,6 +55,31 @@ export async function migrateMetaobjectDefinition(admin: AdminApiContext) {
     if (!defNode) return;
 
     console.log(`[MIGRATE] displayNameKey actuel: "${defNode.displayNameKey}"`);
+
+    // 2. Vérifier s'il y a des entrées existantes
+    const entriesQuery = `query { metaobjects(first: 1, type: "${METAOBJECT_TYPE}") { edges { node { id } } } }`;
+    const er = await admin.graphql(entriesQuery);
+    const ed = (await er.json()) as any;
+    const hasEntries = (ed.data?.metaobjects?.edges?.length ?? 0) > 0;
+
+    if (!hasEntries) {
+      // Aucune entrée → détruire et recréer avec displayNameKey dans le CREATE
+      console.log("[MIGRATE] Aucune entrée — suppression et recréation de la définition avec displayNameKey...");
+      const deleteMutation = `mutation metaobjectDefinitionDelete($id: ID!) {
+        metaobjectDefinitionDelete(id: $id) { userErrors { field message } }
+      }`;
+      const dr = await admin.graphql(deleteMutation, { variables: { id: defNode.id } });
+      const dd = (await dr.json()) as any;
+      if (dd.data?.metaobjectDefinitionDelete?.userErrors?.length > 0) {
+        console.warn("[MIGRATE] Erreur suppression définition:", JSON.stringify(dd.data.metaobjectDefinitionDelete.userErrors));
+        return;
+      }
+      const result = await createMetaobject(admin);
+      console.log("[MIGRATE] Définition recréée avec displayNameKey:", result.success ? "OK" : result.error);
+      return;
+    }
+
+    // 3. Des entrées existent — ajouter les champs manquants + tenter de mettre à jour displayNameKey
     const existingKeys: string[] = defNode.fieldDefinitions.map((f: any) => f.key);
     const toAdd: any[] = [];
 
@@ -84,12 +109,12 @@ export async function migrateMetaobjectDefinition(admin: AdminApiContext) {
     const definitionUpdate: Record<string, unknown> = { displayNameKey: "identification" };
     if (fieldDefinitionsOps.length > 0) {
       definitionUpdate.fieldDefinitions = fieldDefinitionsOps;
-      console.log(`[MIGRATE] Ajout de ${toAdd.length} champ(s) à la définition:`, toAdd.map(f => f.key));
+      console.log(`[MIGRATE] Ajout de ${toAdd.length} champ(s):`, toAdd.map(f => f.key));
     }
 
     const mutation = `mutation metaobjectDefinitionUpdate($id: ID!, $definition: MetaobjectDefinitionUpdateInput!) {
       metaobjectDefinitionUpdate(id: $id, definition: $definition) {
-        metaobjectDefinition { id }
+        metaobjectDefinition { id displayNameKey }
         userErrors { field message }
       }
     }`;
@@ -98,12 +123,13 @@ export async function migrateMetaobjectDefinition(admin: AdminApiContext) {
     });
     const md = (await mr.json()) as any;
     if (md.data?.metaobjectDefinitionUpdate?.userErrors?.length > 0) {
-      console.warn("[MIGRATE] Erreurs migration:", JSON.stringify(md.data.metaobjectDefinitionUpdate.userErrors));
+      console.warn("[MIGRATE] Erreurs:", JSON.stringify(md.data.metaobjectDefinitionUpdate.userErrors));
     } else {
-      console.log("[MIGRATE] Migration réussie. displayNameKey devrait être: identification");
+      const updatedKey = md.data?.metaobjectDefinitionUpdate?.metaobjectDefinition?.displayNameKey;
+      console.log(`[MIGRATE] Mise à jour réussie. displayNameKey après update: "${updatedKey}"`);
     }
   } catch (e) {
-    console.warn("[MIGRATE] Exception migration (non-bloquant):", e);
+    console.warn("[MIGRATE] Exception (non-bloquant):", e);
   }
 }
 
@@ -218,6 +244,7 @@ export async function createMetaobject(admin: AdminApiContext) {
     definition: {
       name: METAOBJECT_NAME,
       type: METAOBJECT_TYPE,
+      displayNameKey: "identification",
       fieldDefinitions,
       capabilities: { publishable: { enabled: true } },
     },
