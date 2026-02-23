@@ -70,6 +70,35 @@ export async function updateCustomerProMetafields(
   }
 }
 
+export async function deleteCustomerCodePromo(admin: AdminApiContext, customerId: string) {
+  // Supprime la valeur du MF code_promo pour ce client (la définition MF reste intacte)
+  const mutation = `
+    mutation metafieldsDelete($metafields: [MetafieldIdentifierInput!]!) {
+      metafieldsDelete(metafields: $metafields) {
+        deletedMetafields { ownerId namespace key }
+        userErrors { field message }
+      }
+    }
+  `;
+  try {
+    const r = await admin.graphql(mutation, {
+      variables: {
+        metafields: [{ ownerId: customerId, namespace: "custom", key: "code_promo" }],
+      },
+    });
+    const d = await r.json() as any;
+    if (d.data?.metafieldsDelete?.userErrors?.length > 0) {
+      console.warn("[MF PRO] Erreur vidage code_promo MF:", d.data.metafieldsDelete.userErrors);
+      return { success: false, error: d.data.metafieldsDelete.userErrors[0].message };
+    }
+    console.log("[MF PRO] code_promo MF vidé pour :", customerId);
+    return { success: true };
+  } catch (e) {
+    console.error("[MF PRO] Crash vidage code_promo MF:", e);
+    return { success: false, error: String(e) };
+  }
+}
+
 export async function ensureCustomerPro(admin: AdminApiContext, rawEmail: string, firstName: string, lastName: string, profession?: string, adresse?: string) {
   const email = cleanEmail(rawEmail);
 
@@ -110,24 +139,39 @@ export async function ensureCustomerPro(admin: AdminApiContext, rawEmail: string
       const r = await admin.graphql(createMutation, { variables });
       const d = await r.json() as any;
       if (d.data?.customerCreate?.userErrors?.length > 0) {
+          const userError = d.data.customerCreate.userErrors[0];
+          const msg = userError.message || "";
+          // Si email déjà pris, le client existe mais on ne peut pas le retrouver (Protected Data)
+          if (msg.toLowerCase().includes("taken") || msg.toLowerCase().includes("already") || msg.toLowerCase().includes("email")) {
+            console.warn("[CUSTOMER] Email déjà pris — client existe mais inaccessible (Protected Data). customer_id non sauvegardé.");
+            return { success: true, customerId: null };
+          }
           console.error("[CUSTOMER] Erreur création:", d.data.customerCreate.userErrors);
-          return { success: false, error: d.data.customerCreate.userErrors[0].message };
+          return { success: false, error: userError.message };
       }
       customerId = d.data?.customerCreate?.customer?.id;
       console.log(`[CUSTOMER] Créé avec succès : ${customerId}`);
     } catch (e) { return { success: false, error: String(e) }; }
   } 
 
-  // 3. Mise à jour complète (Nom, Email, Profession, Adresse physique)
+  // 3. Mise à jour complète (Nom, Email, Profession, Adresse physique) — non-bloquant
   if (customerId) {
-      console.log(`[CUSTOMER] Synchronisation finale des données pour ${customerId}...`);
-      await updateCustomerInShopify(admin, customerId, email, firstName, lastName, profession, adresse);
-      
-      // Ajout du Tag si manquant
+      try {
+        console.log(`[CUSTOMER] Synchronisation finale des données pour ${customerId}...`);
+        await updateCustomerInShopify(admin, customerId, email, firstName, lastName, profession, adresse);
+      } catch (updateErr) {
+        console.warn("[CUSTOMER] updateCustomerInShopify échoué (non-bloquant):", updateErr);
+      }
+
+      // Ajout du Tag si manquant — non-bloquant
       if (!currentTags.includes(PRO_TAG)) {
-          console.log(`[CUSTOMER] Ajout du tag pro...`);
-          const tagsAddMutation = `mutation tagsAdd($id: ID!, $tags: [String!]!) { tagsAdd(id: $id, tags: $tags) { userErrors { field message } } }`;
-          await admin.graphql(tagsAddMutation, { variables: { id: customerId, tags: [PRO_TAG] } });
+          try {
+            console.log(`[CUSTOMER] Ajout du tag pro...`);
+            const tagsAddMutation = `mutation tagsAdd($id: ID!, $tags: [String!]!) { tagsAdd(id: $id, tags: $tags) { userErrors { field message } } }`;
+            await admin.graphql(tagsAddMutation, { variables: { id: customerId, tags: [PRO_TAG] } });
+          } catch (tagErr) {
+            console.warn("[CUSTOMER] tagsAdd échoué (non-bloquant):", tagErr);
+          }
       }
   }
 
