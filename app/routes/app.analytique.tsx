@@ -76,7 +76,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const profEntriesFiltered = isProfFiltered
     ? entries.filter((e: any) => selectedProfessions.includes(e.profession))
     : entries;
-  const allowedCodes = new Set<string>(profEntriesFiltered.map((e: any) => e.code).filter(Boolean));
+  // Seulement les pros actifs pour les stats/chart (Shopify retourne les codes en majuscules)
+  const activeEntries = profEntriesFiltered.filter((e: any) => e.status !== false);
+  const allowedCodes = new Set<string>(
+    activeEntries.map((e: any) => e.code?.toUpperCase()).filter(Boolean)
+  );
 
   let stats = {
     totalOrders: 0,
@@ -139,8 +143,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         filteredMonthlyMap.set(mk, { month: MONTH_ABBR[d.getMonth()], count: 0, ghost: !isInRange });
       }
 
-      // Requête couvrant les 6 mois de la fenêtre
-      const extendedQueryString = `created_at:>=${windowBeginStr} AND discount_code:*`;
+      // Requête ciblée sur les codes affiliés dans la fenêtre de 6 mois
+      const codeFilterStr = [...allowedCodes].map(c => `discount_code:${c}`).join(" OR ");
+      const extendedQueryString = codeFilterStr
+        ? `created_at:>=${windowBeginStr} AND (${codeFilterStr})`
+        : `created_at:>=${windowBeginStr} AND discount_code:*`;
 
       while (hasNextPage && pagesLoaded < maxPages) {
         const response = await admin.graphql(query, { // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -161,9 +168,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
           // proStats et stats.totalOrders : uniquement pour les commandes dans la plage filtrée
           if (isInFilterRange && codesUsed.length > 0) {
-            codesUsed.filter((c: string) => allowedCodes.has(c)).forEach((code: string) => {
-              const current = proStats.get(code) || { revenue: 0, count: 0 };
-              proStats.set(code, {
+            codesUsed.filter((c: string) => allowedCodes.has(c.toUpperCase())).forEach((code: string) => {
+              const key = code.toUpperCase();
+              const current = proStats.get(key) || { revenue: 0, count: 0 };
+              proStats.set(key, {
                 revenue: current.revenue + revenue,
                 count: current.count + 1,
               });
@@ -173,7 +181,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           }
 
           // Chart : toutes les commandes (ghost + actives), filtrées par pros enregistrés
-          const relevantChartCodes = codesUsed.filter((c: string) => allowedCodes.has(c));
+          const relevantChartCodes = codesUsed.filter((c: string) => allowedCodes.has(c.toUpperCase()));
           if (relevantChartCodes.length > 0) {
             const mk = `${createdAt.getFullYear()}-${String(createdAt.getMonth() + 1).padStart(2, "0")}`;
             const isGhost = filteredMonthlyMap.get(mk)?.ghost ?? !isInFilterRange;
@@ -194,7 +202,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
       ranking = profEntriesFiltered
         .map((entry: any) => {
-          const periodData = proStats.get(entry.code) || {
+          const periodData = proStats.get(entry.code?.toUpperCase()) || {
             revenue: 0,
             count: 0,
           };
@@ -214,28 +222,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       console.error("Erreur filtrage analytique:", e);
     }
   } else {
-    // VUE PAR DÉFAUT : utilisation des données cachées dans les metaobjects
-    // (mises à jour en temps réel par le webhook orders/create — aucun appel API orders nécessaire)
-    ranking = profEntriesFiltered
-      .map((entry: any) => {
-        const cachedRevenue = parseFloat(entry.cache_revenue || "0") || 0;
-        const cachedOrders = parseInt(entry.cache_orders_count || "0") || 0;
-        stats.totalRevenue += cachedRevenue;
-        stats.totalOrders += cachedOrders;
-        return {
-          id: entry.id,
-          name: [entry.first_name, entry.last_name].filter(Boolean).join(" ") || entry.name || "Sans nom",
-          profession: entry.profession || "-",
-          code: entry.code || "-",
-          value: entry.montant != null ? `${entry.montant} ${entry.type || "%"}` : "-",
-          revenue: cachedRevenue,
-          ordersCount: cachedOrders,
-          customerId: entry.customer_id || null,
-        };
-      })
-      .sort((a: any, b: any) => (b.revenue || 0) - (a.revenue || 0));
-
-    // --- Sparkline : commandes par mois (6 derniers mois) ---
+    // VUE PAR DÉFAUT : requête Shopify live — toutes les commandes historiques, pros actifs uniquement
+    const proStatsTotal = new Map<string, { revenue: number; count: number }>();
     const chartNow = new Date();
     const monthlyMap = new Map<string, { month: string; count: number; ghost?: boolean }>();
     for (let i = 5; i >= 0; i--) {
@@ -244,32 +232,72 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       monthlyMap.set(k, { month: MONTH_ABBR[d.getMonth()], count: 0 });
     }
     try {
-      const sixAgo = new Date(chartNow.getFullYear(), chartNow.getMonth() - 5, 1);
-      const sixAgoStr = `${sixAgo.getFullYear()}-${String(sixAgo.getMonth() + 1).padStart(2, "0")}-01`;
-      const mq = `#graphql
-        query GetMonthlySparks($qs: String!, $cursor: String) {
+      const liveQuery = `#graphql
+        query GetAllAffiliateOrders($qs: String!, $cursor: String) {
           orders(first: 250, query: $qs, after: $cursor) {
-            edges { node { createdAt discountCodes } }
+            edges {
+              node {
+                createdAt
+                totalPriceSet { shopMoney { amount } }
+                discountCodes
+              }
+            }
             pageInfo { hasNextPage endCursor }
           }
         }
       `;
+      // Requête ciblée : seulement les commandes avec un code affilié
+      const codeQuery = [...allowedCodes].map(c => `discount_code:${c}`).join(" OR ");
+      if (!codeQuery) {
+        // Aucun pro actif, pas besoin de requêter
+        chartData = [...monthlyMap.entries()]
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([k, v]) => ({ ...v, key: k }));
+        return {
+          stats,
+          ranking: profEntriesFiltered.map((entry: any) => ({
+            id: entry.id,
+            name: [entry.first_name, entry.last_name].filter(Boolean).join(" ") || entry.name || "Sans nom",
+            profession: entry.profession || "-",
+            code: entry.code || "-",
+            value: entry.montant != null ? `${entry.montant} ${entry.type || "%"}` : "-",
+            revenue: 0,
+            ordersCount: 0,
+            customerId: entry.customer_id || null,
+          })),
+          isInitialized: true,
+          filters: { startDate: "", endDate: "" },
+          chartData,
+          professionList,
+          selectedProfessions,
+          shopDomain,
+        };
+      }
       let hasMore = true;
-      let cursor = null;
+      let cursor: string | null = null;
       let pages = 0;
-      while (hasMore && pages < 4) {
-        const resp = await admin.graphql(mq, {
-          variables: { qs: `created_at:>=${sixAgoStr} AND discount_code:*`, cursor },
+      const maxPages = 20; // 5000 commandes max
+      while (hasMore && pages < maxPages) {
+        const resp = await admin.graphql(liveQuery, { // eslint-disable-line @typescript-eslint/no-explicit-any
+          variables: { qs: codeQuery, cursor },
         });
         const mData = await resp.json() as any; // eslint-disable-line @typescript-eslint/no-explicit-any
         for (const edge of mData.data?.orders?.edges || []) {
-          const edgeCodes = edge.node.discountCodes || [];
-          const relevantCodes = edgeCodes.filter((c: string) => allowedCodes.has(c));
+          const edgeCodes: string[] = edge.node.discountCodes || [];
+          const relevantCodes = edgeCodes.filter((c: string) => allowedCodes.has(c.toUpperCase()));
           if (relevantCodes.length > 0) {
+            const revenue = parseFloat(edge.node.totalPriceSet.shopMoney.amount);
             const createdAt = new Date(edge.node.createdAt);
-            const k = `${createdAt.getFullYear()}-${String(createdAt.getMonth() + 1).padStart(2, "0")}`;
-            const ex = monthlyMap.get(k);
-            if (ex) monthlyMap.set(k, { ...ex, count: ex.count + 1 });
+            // Stats totales par pro
+            relevantCodes.forEach((code: string) => {
+              const key = code.toUpperCase();
+              const cur = proStatsTotal.get(key) || { revenue: 0, count: 0 };
+              proStatsTotal.set(key, { revenue: cur.revenue + revenue, count: cur.count + 1 });
+            });
+            // Sparkline 6 derniers mois
+            const mk = `${createdAt.getFullYear()}-${String(createdAt.getMonth() + 1).padStart(2, "0")}`;
+            const ex = monthlyMap.get(mk);
+            if (ex) monthlyMap.set(mk, { ...ex, count: ex.count + 1 });
           }
         }
         hasMore = !!mData.data?.orders?.pageInfo?.hasNextPage;
@@ -277,8 +305,27 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         pages++;
       }
     } catch (e) {
-      console.error("Chart data error:", e);
+      console.error("Erreur stats live analytique:", e);
     }
+
+    ranking = profEntriesFiltered
+      .map((entry: any) => {
+        const periodData = proStatsTotal.get(entry.code?.toUpperCase()) || { revenue: 0, count: 0 };
+        stats.totalRevenue += periodData.revenue;
+        stats.totalOrders += periodData.count;
+        return {
+          id: entry.id,
+          name: [entry.first_name, entry.last_name].filter(Boolean).join(" ") || entry.name || "Sans nom",
+          profession: entry.profession || "-",
+          code: entry.code || "-",
+          value: entry.montant != null ? `${entry.montant} ${entry.type || "%"}` : "-",
+          revenue: periodData.revenue,
+          ordersCount: periodData.count,
+          customerId: entry.customer_id || null,
+        };
+      })
+      .sort((a: any, b: any) => (b.revenue || 0) - (a.revenue || 0));
+
     chartData = [...monthlyMap.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([k, v]) => ({ ...v, key: k }));

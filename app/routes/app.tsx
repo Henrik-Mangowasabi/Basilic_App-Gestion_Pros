@@ -1,5 +1,6 @@
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { Outlet, useLoaderData, useRouteError, useNavigation } from "react-router";
+import { useState, useEffect } from "react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { AppProvider as ShopifyAppProvider } from "@shopify/shopify-app-react-router/react";
 import { AppProvider as PolarisAppProvider } from "@shopify/polaris";
@@ -62,7 +63,16 @@ function AppInner() {
 export default function App() {
   const { apiKey, adminPassword } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
-  const isNavigating = navigation.state === "loading";
+  const [showLoading, setShowLoading] = useState(false);
+
+  useEffect(() => {
+    if (navigation.state === "loading") {
+      const timer = setTimeout(() => setShowLoading(true), 300);
+      return () => clearTimeout(timer);
+    } else {
+      setShowLoading(false);
+    }
+  }, [navigation.state]);
 
   return (
     <ShopifyAppProvider embedded apiKey={apiKey}>
@@ -76,7 +86,7 @@ export default function App() {
         <EditModeProvider adminPassword={adminPassword}>
           <AppInner />
         </EditModeProvider>
-        {isNavigating && (
+        {showLoading && (
           <div className="loading-overlay">
             <div className="loading-modal">
               <div className="loading-modal__spinner" />
