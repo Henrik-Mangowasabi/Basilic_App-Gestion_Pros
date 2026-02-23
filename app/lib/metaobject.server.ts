@@ -76,14 +76,15 @@ export async function migrateMetaobjectDefinition(admin: AdminApiContext) {
       toAdd.push({ name: "Cache CA Remainder", key: "cache_ca_remainder", type: "number_decimal", required: false });
     }
 
-    if (toAdd.length === 0) return; // Déjà à jour
-
-    console.log(`[MIGRATE] Ajout de ${toAdd.length} champ(s) à la définition:`, toAdd.map(f => f.key));
-
-    // API 2025-10 utilise fieldDefinitions avec { create: { ... } } au lieu de addFieldDefinitions
     const fieldDefinitionsOps = toAdd.map(f => ({
       create: { name: f.name, key: f.key, type: f.type },
     }));
+
+    const definitionUpdate: Record<string, unknown> = { displayNameKey: "identification" };
+    if (fieldDefinitionsOps.length > 0) {
+      definitionUpdate.fieldDefinitions = fieldDefinitionsOps;
+      console.log(`[MIGRATE] Ajout de ${toAdd.length} champ(s) à la définition:`, toAdd.map(f => f.key));
+    }
 
     const mutation = `mutation metaobjectDefinitionUpdate($id: ID!, $definition: MetaobjectDefinitionUpdateInput!) {
       metaobjectDefinitionUpdate(id: $id, definition: $definition) {
@@ -92,7 +93,7 @@ export async function migrateMetaobjectDefinition(admin: AdminApiContext) {
       }
     }`;
     const mr = await admin.graphql(mutation, {
-      variables: { id: defNode.id, definition: { fieldDefinitions: fieldDefinitionsOps } },
+      variables: { id: defNode.id, definition: definitionUpdate },
     });
     const md = (await mr.json()) as any;
     if (md.data?.metaobjectDefinitionUpdate?.userErrors?.length > 0) {
@@ -372,11 +373,7 @@ export async function createMetaobjectEntry(
     const data = (await response.json()) as any;
 
     if (data.data?.metaobjectCreate?.userErrors?.length > 0) {
-      const errs = data.data.metaobjectCreate.userErrors;
-      console.error("❌ metaobjectCreate userErrors:", JSON.stringify(errs));
-      console.error("❌ fieldsInput envoyé:", JSON.stringify(fieldsInput));
-      console.error("❌ handle envoyé:", handle);
-      throw new Error(errs[0].message);
+      throw new Error(data.data.metaobjectCreate.userErrors[0].message);
     }
 
     // 4. Mise à jour metafield code_promo sur la fiche client (non-bloquant)
