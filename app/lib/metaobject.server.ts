@@ -384,11 +384,6 @@ export async function createMetaobjectEntry(
       { key: "customer_id", value: customerIdToSave },
       { key: "profession", value: String(fields.profession || "") },
       { key: "adresse", value: String(fields.adresse || "") },
-      // Initialisation des compteurs à 0
-      { key: "cache_revenue", value: "0" },
-      { key: "cache_orders_count", value: "0" },
-      { key: "cache_credit_earned", value: "0" },
-      { key: "cache_ca_remainder", value: "0" },
     ];
 
     const mutation = `mutation metaobjectCreate($metaobject: MetaobjectCreateInput!) { metaobjectCreate(metaobject: $metaobject) { metaobject { id }, userErrors { field message } } }`;
