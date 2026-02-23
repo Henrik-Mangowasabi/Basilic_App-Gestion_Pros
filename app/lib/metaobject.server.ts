@@ -372,7 +372,11 @@ export async function createMetaobjectEntry(
     const data = (await response.json()) as any;
 
     if (data.data?.metaobjectCreate?.userErrors?.length > 0) {
-      throw new Error(data.data.metaobjectCreate.userErrors[0].message);
+      const errs = data.data.metaobjectCreate.userErrors;
+      console.error("❌ metaobjectCreate userErrors:", JSON.stringify(errs));
+      console.error("❌ fieldsInput envoyé:", JSON.stringify(fieldsInput));
+      console.error("❌ handle envoyé:", handle);
+      throw new Error(errs[0].message);
     }
 
     // 4. Mise à jour metafield code_promo sur la fiche client (non-bloquant)
