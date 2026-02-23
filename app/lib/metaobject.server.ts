@@ -363,9 +363,10 @@ export async function createMetaobjectEntry(
     ];
 
     const mutation = `mutation metaobjectCreate($metaobject: MetaobjectCreateInput!) { metaobjectCreate(metaobject: $metaobject) { metaobject { id }, userErrors { field message } } }`;
+    const handle = String(fields.identification || fields.email).toLowerCase().replace(/[^a-z0-9]/g, "_").slice(0, 64);
     const response = await admin.graphql(mutation, {
       variables: {
-        metaobject: { type: METAOBJECT_TYPE, fields: fieldsInput },
+        metaobject: { type: METAOBJECT_TYPE, handle, fields: fieldsInput },
       },
     });
     const data = (await response.json()) as any;
