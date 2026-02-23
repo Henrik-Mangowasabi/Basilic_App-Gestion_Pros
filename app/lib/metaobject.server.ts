@@ -395,7 +395,12 @@ export async function createMetaobjectEntry(
     const handle = String(fields.identification || fields.email).toLowerCase().replace(/[^a-z0-9]/g, "_").slice(0, 64);
     const response = await admin.graphql(mutation, {
       variables: {
-        metaobject: { type: METAOBJECT_TYPE, handle, fields: fieldsInput },
+        metaobject: {
+          type: METAOBJECT_TYPE,
+          handle,
+          fields: fieldsInput,
+          capabilities: { publishable: { status: "ACTIVE" } },
+        },
       },
     });
     const data = (await response.json()) as any;
