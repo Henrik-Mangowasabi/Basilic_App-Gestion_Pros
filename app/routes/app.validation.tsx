@@ -27,7 +27,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const query = `#graphql
     query getCustomersPending($cursor: String) {
-      customers(first: 250, query: "metafield_namespace_and_key:custom.pro_en_attente_de_validation", after: $cursor) {
+      customers(first: 250, query: "tag:pro_pending", after: $cursor) {
         edges {
           node {
             id
@@ -201,6 +201,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           ],
         },
       });
+
+      // Retire le tag pro_pending
+      await admin.graphql(`#graphql
+        mutation TagsRemove($id: ID!, $tags: [String!]!) {
+          tagsRemove(id: $id, tags: $tags) {
+            node { id }
+            userErrors { field message }
+          }
+        }
+      `, { variables: { id: customerId, tags: ["pro_pending"] } });
     } catch (e) {
       console.error("Erreur suppression metafield:", e);
     }
@@ -236,6 +246,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           },
         },
       });
+
+      // Retire le tag pro_pending
+      await admin.graphql(`#graphql
+        mutation TagsRemove($id: ID!, $tags: [String!]!) {
+          tagsRemove(id: $id, tags: $tags) {
+            node { id }
+            userErrors { field message }
+          }
+        }
+      `, { variables: { id: customerId, tags: ["pro_pending"] } });
     } catch (e) {
       console.error("Erreur reject:", e);
       return { error: "Erreur lors du rejet" };
@@ -367,6 +387,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           },
         });
 
+        // Retire le tag pro_pending
+        await admin.graphql(`#graphql
+          mutation TagsRemove($id: ID!, $tags: [String!]!) {
+            tagsRemove(id: $id, tags: $tags) {
+              node { id }
+              userErrors { field message }
+            }
+          }
+        `, { variables: { id: customerId, tags: ["pro_pending"] } });
+
         succeeded++;
       } catch (e) {
         console.error("Erreur bulk accept:", e);
@@ -409,6 +439,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             },
           },
         });
+
+        // Retire le tag pro_pending
+        await admin.graphql(`#graphql
+          mutation TagsRemove($id: ID!, $tags: [String!]!) {
+            tagsRemove(id: $id, tags: $tags) {
+              node { id }
+              userErrors { field message }
+            }
+          }
+        `, { variables: { id: customerId, tags: ["pro_pending"] } });
+
         count++;
       } catch (e) {
         console.error("Erreur bulk reject:", e);

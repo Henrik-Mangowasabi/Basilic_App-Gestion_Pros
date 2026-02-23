@@ -91,29 +91,44 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const customer = customerData.data?.customers?.edges?.[0]?.node;
 
     if (!customer) {
-      console.warn(`Klaviyo webhook: client introuvable pour ${email} — ignoré`);
-      // On retourne 200 pour éviter les retries Klaviyo (le client n'existe pas encore dans Shopify)
-      return new Response("Customer not found, skipping", { status: 200 });
+      // Crée le client dans Shopify
+      const metafields: Array<{ namespace: string; key: string; value: string; type: string }> = [
+        { namespace: "custom", key: "pro_en_attente_de_validation", value: "en_attente", type: "single_line_text_field" },
+      ];
+      if (profession) metafields.push({ namespace: "custom", key: "profession", value: profession, type: "single_line_text_field" });
+      if (adresse) metafields.push({ namespace: "custom", key: "adresse", value: adresse, type: "single_line_text_field" });
+
+      const createInput: Record<string, unknown> = { email, tags: ["pro_pending"], metafields };
+      if (firstName) createInput.firstName = firstName;
+      if (lastName) createInput.lastName = lastName;
+
+      const createResp = await admin.graphql(`#graphql
+        mutation CreateCustomerPending($input: CustomerInput!) {
+          customerCreate(input: $input) {
+            customer { id email }
+            userErrors { field message }
+          }
+        }
+      `, { variables: { input: createInput } });
+
+      const createData = await createResp.json() as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+      const createErrors = createData.data?.customerCreate?.userErrors;
+      if (createErrors?.length > 0) {
+        console.error("Klaviyo webhook: erreur création client", createErrors);
+        return new Response("Error creating customer", { status: 500 });
+      }
+
+      console.log(`✅ Klaviyo webhook: client créé pour ${email}`);
+      return new Response("OK", { status: 200 });
     }
 
-    // Metafields à mettre à jour
+    // Client existant — met à jour les metafields
     const metafields: Array<{ namespace: string; key: string; value: string; type: string }> = [
-      {
-        namespace: "custom",
-        key: "pro_en_attente_de_validation",
-        value: "en_attente",
-        type: "single_line_text_field",
-      },
+      { namespace: "custom", key: "pro_en_attente_de_validation", value: "en_attente", type: "single_line_text_field" },
     ];
+    if (profession) metafields.push({ namespace: "custom", key: "profession", value: profession, type: "single_line_text_field" });
+    if (adresse) metafields.push({ namespace: "custom", key: "adresse", value: adresse, type: "single_line_text_field" });
 
-    if (profession) {
-      metafields.push({ namespace: "custom", key: "profession", value: profession, type: "single_line_text_field" });
-    }
-    if (adresse) {
-      metafields.push({ namespace: "custom", key: "adresse", value: adresse, type: "single_line_text_field" });
-    }
-
-    // Mise à jour du client (noms uniquement si vides dans Shopify)
     const customerInput: Record<string, unknown> = { id: customer.id, metafields };
     if (firstName && !customer.firstName) customerInput.firstName = firstName;
     if (lastName && !customer.lastName) customerInput.lastName = lastName;
@@ -134,7 +149,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return new Response("Error updating customer", { status: 500 });
     }
 
-    console.log(`✅ Klaviyo webhook: pro_en_attente_de_validation défini pour ${email}`);
+    // Ajoute le tag pro_pending pour recherche instantanée
+    await admin.graphql(`#graphql
+      mutation TagsAdd($id: ID!, $tags: [String!]!) {
+        tagsAdd(id: $id, tags: $tags) {
+          node { id }
+          userErrors { field message }
+        }
+      }
+    `, { variables: { id: customer.id, tags: ["pro_pending"] } });
+
+    console.log(`✅ Klaviyo webhook: pro_en_attente_de_validation + tag définis pour ${email}`);
     return new Response("OK", { status: 200 });
   } catch (e) {
     console.error("Klaviyo webhook: erreur interne", e);
