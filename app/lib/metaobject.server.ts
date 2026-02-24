@@ -373,6 +373,7 @@ export async function createMetaobjectEntry(
     // 3. CRÉATION MÉTAOBJET
     const fieldsInput = [
       { key: "identification", value: String(fields.identification) },
+      { key: "name", value: fullName },
       { key: "first_name", value: String(fields.first_name || "") },
       { key: "last_name", value: String(fields.last_name || "") },
       { key: "email", value: String(fields.email) },
@@ -384,6 +385,10 @@ export async function createMetaobjectEntry(
       { key: "customer_id", value: customerIdToSave },
       { key: "profession", value: String(fields.profession || "") },
       { key: "adresse", value: String(fields.adresse || "") },
+      { key: "cache_revenue", value: "0" },
+      { key: "cache_orders_count", value: "0" },
+      { key: "cache_credit_earned", value: "0" },
+      { key: "cache_ca_remainder", value: "0" },
     ];
 
     const mutation = `mutation metaobjectCreate($metaobject: MetaobjectCreateInput!) { metaobjectCreate(metaobject: $metaobject) { metaobject { id }, userErrors { field message } } }`;
