@@ -1,6 +1,7 @@
 import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import { getMetaobjectEntries } from "../lib/metaobject.server";
+import { updateCustomerProMetafields } from "../lib/customer.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
@@ -8,6 +9,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   const metaobjectId = formData.get("metaobjectId") as string;
   const code = formData.get("code") as string;
+  const customerId = formData.get("customerId") as string | null;
 
   if (!metaobjectId || !code) {
     return new Response(JSON.stringify({ error: "metaobjectId and code sont requis" }), {
@@ -112,6 +114,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }), {
       headers: { "Content-Type": "application/json" },
     });
+  }
+
+  // Mettre à jour le metafield ca_genere sur la fiche client (si lié)
+  if (customerId) {
+    try {
+      await updateCustomerProMetafields(admin, customerId, { ca_genere: totalRevenue });
+    } catch (mfError) {
+      console.warn("[recalculate] Echec mise à jour ca_genere (non bloquant):", mfError);
+    }
   }
 
   return new Response(JSON.stringify({

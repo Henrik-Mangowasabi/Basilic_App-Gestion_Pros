@@ -1163,6 +1163,7 @@ function RecalculateSingleButton({ entry, onDone }: { entry: any; onDone: () => 
     const fd = new FormData();
     fd.append("metaobjectId", entry.id);
     fd.append("code", entry.code);
+    if (entry.customer_id) fd.append("customerId", entry.customer_id);
     try {
       await fetch("/app/api/recalculate-cache", { method: "POST", body: fd });
     } finally {
@@ -1207,6 +1208,7 @@ function RecalculateCacheModal({ entries, onClose }: { entries: any[]; onClose: 
       const fd = new FormData();
       fd.append("metaobjectId", entry.id);
       fd.append("code", entry.code);
+      if (entry.customer_id) fd.append("customerId", entry.customer_id);
 
       try {
         const res = await fetch("/app/api/recalculate-cache", { method: "POST", body: fd });
