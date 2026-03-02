@@ -1980,7 +1980,7 @@ export default function Index() {
                             </td>
                             <td className="ui-table__td mf-cell--devmode mf-cell--devmode--blue">
                               <div className="mf-cell mf-cell--center">
-                                <span className="mf-text--title">{parseFloat((entry as { cache_revenue?: string }).cache_revenue || "0")}€</span>
+                                <span className="mf-text--title">{parseFloat((entry as { cache_revenue?: string }).cache_revenue || "0").toFixed(2)}€</span>
                               </div>
                             </td>
                             <td className="ui-table__td mf-cell--devmode mf-cell--devmode--blue">
