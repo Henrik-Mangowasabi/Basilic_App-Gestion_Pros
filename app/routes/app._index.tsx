@@ -1168,6 +1168,7 @@ function RecalculateSingleButton({ entry, onDone }: { entry: any; onDone: () => 
       await fetch("/app/api/recalculate-cache", { method: "POST", body: fd });
     } finally {
       setLoading(false);
+      indexCache = null;
       revalidator.revalidate();
       onDone();
     }
@@ -1229,6 +1230,7 @@ function RecalculateCacheModal({ entries, onClose }: { entries: any[]; onClose: 
     setErrors(errs);
     setIsRunning(false);
     setDone(true);
+    indexCache = null;
     revalidator.revalidate();
   };
 
