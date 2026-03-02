@@ -76,10 +76,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const profEntriesFiltered = isProfFiltered
     ? entries.filter((e: any) => selectedProfessions.includes(e.profession))
     : entries;
-  // Seulement les pros actifs pour les stats/chart (Shopify retourne les codes en majuscules)
-  const activeEntries = profEntriesFiltered.filter((e: any) => e.status !== false);
+  // Tous les pros (actifs ET inactifs) contribuent au CA total
   const allowedCodes = new Set<string>(
-    activeEntries.map((e: any) => e.code?.toUpperCase()).filter(Boolean)
+    profEntriesFiltered.map((e: any) => e.code?.toUpperCase()).filter(Boolean)
   );
 
   let stats = {
@@ -105,7 +104,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           edges {
             node {
               createdAt
-              totalPriceSet {
+              subtotalPriceSet {
                 shopMoney {
                   amount
                 }
@@ -159,7 +158,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         ordersEdges.forEach((edge: any) => {
           const order = edge.node;
           const createdAt = new Date(order.createdAt);
-          const revenue = parseFloat(order.totalPriceSet.shopMoney.amount);
+          const revenue = parseFloat(order.subtotalPriceSet.shopMoney.amount);
           const codesUsed = order.discountCodes || [];
 
           // Date de la commande en format YYYY-MM-DD pour comparaison
@@ -238,7 +237,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             edges {
               node {
                 createdAt
-                totalPriceSet { shopMoney { amount } }
+                subtotalPriceSet { shopMoney { amount } }
                 discountCodes
               }
             }
@@ -286,7 +285,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           const edgeCodes: string[] = edge.node.discountCodes || [];
           const relevantCodes = edgeCodes.filter((c: string) => allowedCodes.has(c.toUpperCase()));
           if (relevantCodes.length > 0) {
-            const revenue = parseFloat(edge.node.totalPriceSet.shopMoney.amount);
+            const revenue = parseFloat(edge.node.subtotalPriceSet.shopMoney.amount);
             const createdAt = new Date(edge.node.createdAt);
             // Stats totales par pro
             relevantCodes.forEach((code: string) => {
@@ -471,13 +470,23 @@ export default function AnalytiquePage() {
     ? Math.round(((stats.activePros ?? 0) / stats.totalPros) * 100)
     : 0;
 
-  const activeMonths = chartData.filter(d => !d.ghost);
+  const PERIOD_MONTHS_ABBR = ["JAN.","FÉV.","MAR.","AVR.","MAI","JUIN","JUIL.","AOÛ.","SEPT.","OCT.","NOV.","DÉC."];
   const periodLabel = stats?.isDateFiltered
-    ? activeMonths.length > 1
-      ? `${activeMonths[0].month} – ${activeMonths[activeMonths.length - 1].month}`
-      : activeMonths.length === 1
-        ? activeMonths[0].month
-        : "Commandes sur la période"
+    ? (() => {
+        const sd = filters.startDate;
+        const ed = filters.endDate;
+        if (sd && ed) {
+          const s = new Date(sd + "T00:00:00");
+          const e = new Date(ed + "T00:00:00");
+          if (e < s) return "Période invalide";
+          const sm = PERIOD_MONTHS_ABBR[s.getMonth()];
+          const em = PERIOD_MONTHS_ABBR[e.getMonth()];
+          return s.getFullYear() === e.getFullYear() && s.getMonth() === e.getMonth() ? sm : `${sm} – ${em}`;
+        }
+        if (sd) return `À partir de ${PERIOD_MONTHS_ABBR[new Date(sd + "T00:00:00").getMonth()]}`;
+        if (ed) return `Jusqu'à ${PERIOD_MONTHS_ABBR[new Date(ed + "T00:00:00").getMonth()]}`;
+        return "Commandes sur la période";
+      })()
     : "Nombre de commandes par affiliation";
 
   const moisParams = new URLSearchParams();
@@ -606,10 +615,13 @@ export default function AnalytiquePage() {
               className="an-filter-date"
               onChange={(e) => {
                 const val = e.target.value;
+                // Si la nouvelle date de début dépasse la date de fin, reset la fin
+                const newEnd = (val && endDate && val > endDate) ? "" : endDate;
+                if (newEnd !== endDate) setEndDate(newEnd);
                 setStartDate(val);
                 const p = new URLSearchParams();
                 if (val) p.set("startDate", val);
-                if (endDate) p.set("endDate", endDate);
+                if (newEnd) p.set("endDate", newEnd);
                 selectedProfs.forEach(s => p.append("profession", s));
                 navigate(`/app/analytique?${p.toString()}`);
               }}
@@ -624,9 +636,12 @@ export default function AnalytiquePage() {
               className="an-filter-date"
               onChange={(e) => {
                 const val = e.target.value;
+                // Si la nouvelle date de fin est avant la date de début, reset le début
+                const newStart = (val && startDate && val < startDate) ? "" : startDate;
+                if (newStart !== startDate) setStartDate(newStart);
                 setEndDate(val);
                 const p = new URLSearchParams();
-                if (startDate) p.set("startDate", startDate);
+                if (newStart) p.set("startDate", newStart);
                 if (val) p.set("endDate", val);
                 selectedProfs.forEach(s => p.append("profession", s));
                 navigate(`/app/analytique?${p.toString()}`);

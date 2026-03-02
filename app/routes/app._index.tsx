@@ -814,26 +814,13 @@ function ImportResult({ report }: { report: any }) {
       <div className="import-result__header">
         <span className="import-result__title">Rapport d&apos;import</span>
         <div className="import-result__stats">
-          <div className="import-result__stat--added">✅ {report.added} importés</div>
-          <div className="import-result__stat--skipped">⚠️ {report.skipped} doublons</div>
+          {report.added > 0 && <div className="import-result__stat--added">✅ {report.added} créés</div>}
+          {report.updated > 0 && <div className="import-result__stat--skipped">🔄 {report.updated} mis à jour</div>}
           {report.errors.length > 0 && (
             <div className="import-result__stat--error">❌ {report.errors.length} erreurs</div>
           )}
         </div>
       </div>
-
-      {report.duplicates.length > 0 && (
-        <details className="import-result__details">
-          <summary className="import-result__summary">
-            Voir les doublons ({report.duplicates.length})
-          </summary>
-          <ul className="import-result__list">
-            {report.duplicates.map((d: string, i: number) => (
-              <li key={i}>{d}</li>
-            ))}
-          </ul>
-        </details>
-      )}
 
       {report.errors.length > 0 && (
         <details open>
@@ -907,16 +894,15 @@ function ImportForm({ existingEntries, onClose }: { existingEntries: any[]; onCl
     setReport(null);
 
     let added = 0;
-    let skipped = 0;
-    let duplicates: string[] = [];
+    let updated = 0;
     let errors: string[] = [];
 
-    // Préparation Sets Locaux pour check rapide
-    const existingCodes = new Set(
-      existingEntries.map((e: any) => e.code?.toLowerCase().trim()),
+    // Map code → entry existante pour l'upsert
+    const existingByCode = new Map(
+      existingEntries.map((e: any) => [e.code?.toLowerCase().trim(), e]),
     );
-    const existingRefs = new Set(
-      existingEntries.map((e: any) => e.identification?.toLowerCase().trim()),
+    const existingByRef = new Map(
+      existingEntries.map((e: any) => [e.identification?.toLowerCase().trim(), e]),
     );
 
     const itemsToProcess = [];
@@ -991,16 +977,11 @@ function ImportForm({ existingEntries, onClose }: { existingEntries: any[]; onCl
         const prefix = ((first_name.slice(0, 2) + last_name.slice(0, 2)).toUpperCase() || "XX");
         ref = `${prefix}${Date.now().toString(36).slice(-4).toUpperCase()}`;
       }
-      if (existingCodes.has(code.toLowerCase())) {
-        skipped++;
-        duplicates.push(`${displayName} (Code existant: ${code})`);
-        continue;
-      }
-      if (existingRefs.has(ref.toLowerCase())) {
-        skipped++;
-        duplicates.push(`${displayName} (Ref existante: ${ref})`);
-        continue;
-      }
+      // Chercher si une entrée existante correspond (par code ou par ref)
+      const existingEntry =
+        existingByCode.get(code.toLowerCase()) ||
+        existingByRef.get(ref.toLowerCase()) ||
+        null;
 
       itemsToProcess.push({
         identification: ref,
@@ -1012,6 +993,7 @@ function ImportForm({ existingEntries, onClose }: { existingEntries: any[]; onCl
         type,
         profession,
         adresse,
+        existingId: existingEntry?.id || null,
       });
     }
 
@@ -1026,8 +1008,10 @@ function ImportForm({ existingEntries, onClose }: { existingEntries: any[]; onCl
       // Traitement parallèle du batch
       const batchPromises = batch.map(async (item) => {
         const fd = new FormData();
-        fd.append("action", "api_create_partner");
-        Object.keys(item).forEach((k) => fd.append(k, (item as any)[k]));
+        Object.keys(item).forEach((k) => {
+          const v = (item as any)[k];
+          if (v !== null && v !== undefined) fd.append(k, String(v));
+        });
 
         try {
           const res = await fetch("/app/api/import", {
@@ -1043,9 +1027,10 @@ function ImportForm({ existingEntries, onClose }: { existingEntries: any[]; onCl
           const json = await res.json();
 
           if (json.success) {
-            added++;
-            existingCodes.add(item.code.toLowerCase());
-            existingRefs.add(item.identification.toLowerCase());
+            if (json.updated) updated++;
+            else added++;
+            existingByCode.set(item.code.toLowerCase(), item);
+            existingByRef.set(item.identification.toLowerCase(), item);
             return { success: true, item };
           } else {
             let niceError = String(json.error);
@@ -1075,7 +1060,7 @@ function ImportForm({ existingEntries, onClose }: { existingEntries: any[]; onCl
     }
 
     setIsProcessing(false);
-    setReport({ added, skipped, duplicates, errors });
+    setReport({ added, updated, errors });
 
     // Retourner un flag pour que le composant parent revalide
     return added;
