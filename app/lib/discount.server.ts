@@ -33,6 +33,8 @@ export async function createShopifyDiscount(
               },
             },
         items: { all: true },
+        appliesOnOneTimePurchase: true,
+        appliesOnSubscription: true,
       },
     },
   };
@@ -83,6 +85,8 @@ export async function updateShopifyDiscount(
               },
             },
         items: { all: true },
+        appliesOnOneTimePurchase: true,
+        appliesOnSubscription: true,
       },
     },
   };
