@@ -373,7 +373,6 @@ export async function createMetaobjectEntry(
     // 3. CRÉATION MÉTAOBJET
     const fieldsInput = [
       { key: "identification", value: String(fields.identification) },
-      { key: "name", value: fullName },
       { key: "first_name", value: String(fields.first_name || "") },
       { key: "last_name", value: String(fields.last_name || "") },
       { key: "email", value: String(fields.email) },
