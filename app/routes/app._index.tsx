@@ -1153,6 +1153,145 @@ function ImportForm({ existingEntries, onClose }: { existingEntries: any[]; onCl
   );
 }
 
+// --- BOUTON RECALCUL ENTRÉE INDIVIDUELLE ---
+function RecalculateSingleButton({ entry, onDone }: { entry: any; onDone: () => void }) {
+  const [loading, setLoading] = useState(false);
+  const revalidator = useRevalidator();
+
+  const handleClick = async () => {
+    setLoading(true);
+    const fd = new FormData();
+    fd.append("metaobjectId", entry.id);
+    fd.append("code", entry.code);
+    try {
+      await fetch("/app/api/recalculate-cache", { method: "POST", body: fd });
+    } finally {
+      setLoading(false);
+      revalidator.revalidate();
+      onDone();
+    }
+  };
+
+  return (
+    <button type="button" className="mf-dropdown-item" onClick={handleClick} disabled={loading}>
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 20 20" fill="currentColor" className="mf-dropdown-item__icon">
+        <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
+      </svg>
+      <span className="mf-dropdown-item__title">{loading ? "Recalcul..." : "Recalculer le CA"}</span>
+    </button>
+  );
+}
+
+// --- COMPOSANT RECALCUL CACHE ---
+function RecalculateCacheModal({ entries, onClose }: { entries: any[]; onClose: () => void }) {
+  const [isRunning, setIsRunning] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [errors, setErrors] = useState<string[]>([]);
+  const [done, setDone] = useState(false);
+  const revalidator = useRevalidator();
+  const modalRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(modalRef, true, onClose);
+
+  const entriesWithCode = entries.filter((e) => e.code);
+  const total = entriesWithCode.length;
+
+  const runAll = async () => {
+    setIsRunning(true);
+    setProgress(0);
+    setErrors([]);
+    setDone(false);
+    const errs: string[] = [];
+
+    for (let i = 0; i < entriesWithCode.length; i++) {
+      const entry = entriesWithCode[i];
+      const fd = new FormData();
+      fd.append("metaobjectId", entry.id);
+      fd.append("code", entry.code);
+
+      try {
+        const res = await fetch("/app/api/recalculate-cache", { method: "POST", body: fd });
+        if (!res.ok) { errs.push(`${entry.first_name || ""} ${entry.last_name || ""}: HTTP ${res.status}`); }
+        else {
+          const json = await res.json();
+          if (!json.success) errs.push(`${entry.first_name || ""} ${entry.last_name || ""}: ${json.error}`);
+        }
+      } catch (e) {
+        errs.push(`${entry.first_name || ""} ${entry.last_name || ""}: ${String(e)}`);
+      }
+
+      setProgress(i + 1);
+      // Pause légère entre les requêtes pour ne pas surcharger Shopify
+      if (i < entriesWithCode.length - 1) await new Promise((r) => setTimeout(r, 150));
+    }
+
+    setErrors(errs);
+    setIsRunning(false);
+    setDone(true);
+    revalidator.revalidate();
+  };
+
+  return (
+    <div role="presentation" className="bsl-modal" onClick={(e) => { if (e.target === e.currentTarget && !isRunning) onClose(); }}>
+      <div ref={modalRef} role="dialog" aria-modal="true" aria-label="Recalculer le cache CA" className="bsl-modal__dialog bsl-modal__dialog--md">
+        <div className="bsl-modal__header">
+          <h2 className="bsl-modal__title">Recalculer le cache CA</h2>
+          <button type="button" onClick={onClose} disabled={isRunning} className="bsl-modal__close">✕</button>
+        </div>
+        <div className="bsl-modal__body--import">
+          {!done && !isRunning && (
+            <p style={{ fontSize: "14px", color: "#555", margin: 0 }}>
+              Cette opération va recalculer les statistiques de chiffre d&apos;affaires pour <strong>{total} partenaire{total > 1 ? "s" : ""}</strong> en interrogeant l&apos;historique complet des commandes Shopify.
+              <br /><br />
+              <strong style={{ color: "#008060" }}>Aucun store credit ne sera crédité</strong> — seuls les compteurs de cache (CA, commandes) seront mis à jour.
+            </p>
+          )}
+          {isRunning && (
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              <p style={{ fontSize: "14px", color: "#555", margin: 0 }}>
+                Traitement en cours... <strong>{progress} / {total}</strong>
+              </p>
+              <div style={{ background: "#e8f5f1", borderRadius: "8px", height: "10px", overflow: "hidden" }}>
+                <div style={{ background: "#008060", height: "100%", width: `${total > 0 ? (progress / total) * 100 : 0}%`, transition: "width 0.3s ease" }} />
+              </div>
+            </div>
+          )}
+          {done && (
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+              <p style={{ fontSize: "14px", color: "#008060", fontWeight: 600, margin: 0 }}>
+                Recalcul terminé : {total - errors.length} mis à jour{errors.length > 0 ? `, ${errors.length} erreur(s)` : ""}.
+              </p>
+              {errors.length > 0 && (
+                <details>
+                  <summary style={{ fontSize: "13px", color: "#d82c0d", cursor: "pointer" }}>Voir les erreurs ({errors.length})</summary>
+                  <ul style={{ fontSize: "12px", color: "#d82c0d", margin: "4px 0 0 16px", padding: 0 }}>
+                    {errors.map((e, i) => <li key={i}>{e}</li>)}
+                  </ul>
+                </details>
+              )}
+            </div>
+          )}
+        </div>
+        <div className="bsl-modal__footer">
+          <button type="button" onClick={onClose} disabled={isRunning} className="bsl-modal__btn bsl-modal__btn--cancel">
+            {done ? "Fermer" : "Annuler"}
+          </button>
+          {!done && (
+            <button
+              type="button"
+              onClick={runAll}
+              disabled={isRunning || total === 0}
+              className="bsl-modal__btn bsl-modal__btn--primary"
+              style={{ background: isRunning || total === 0 ? "var(--color-gray-300)" : "#008060", cursor: isRunning || total === 0 ? "not-allowed" : "pointer", color: isRunning || total === 0 ? "var(--color-gray-500)" : "white" }}
+            >
+              {isRunning ? <><Spinner /> Traitement...</> : "Recalculer le cache"}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // --- HELPER: Generate unique promo code ---
 function generatePromoCode(
   firstName: string,
@@ -1437,6 +1576,7 @@ export default function Index() {
   const isInitializing = nav.formData?.get("action") === "create_structure";
 
   const [showImport, setShowImport] = useState(false);
+  const [showRecalculate, setShowRecalculate] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [sortConfig, setSortConfig] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
@@ -1693,6 +1833,11 @@ export default function Index() {
         </div>
       )}
 
+      {/* MODALE RECALCUL CACHE */}
+      {showRecalculate && (
+        <RecalculateCacheModal entries={entries} onClose={() => setShowRecalculate(false)} />
+      )}
+
       {status.exists ? (
         <div className="page-container" onClick={() => setContextMenuState(null)}>
 
@@ -1768,6 +1913,19 @@ export default function Index() {
             <div className="table-card__header">
               <span className="table-card__title">Liste des Partenaires ({entries.length})</span>
               <div className="table-header-actions">
+                {showCABlock && (
+                  <button
+                    type="button"
+                    className="btn btn--secondary table-card__new-btn"
+                    onClick={() => setShowRecalculate(true)}
+                    title="Recalculer le cache CA depuis l'historique des commandes"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
+                    </svg>
+                    Recalculer
+                  </button>
+                )}
                 <button
                   type="button"
                   className={`btn btn--secondary table-card__new-btn${showImport ? " btn--secondary-active" : ""}`}
@@ -2025,6 +2183,9 @@ export default function Index() {
                   </svg>
                   <span className="mf-dropdown-item__title">Editer</span>
                 </button>
+                {showCABlock && ctxEntry.code && (
+                  <RecalculateSingleButton entry={ctxEntry} onDone={() => setContextMenuState(null)} />
+                )}
                 <button type="button" className="mf-dropdown-item mf-dropdown-item--delete"
                   onClick={() => { setContextMenuState(null); handleDeleteEntry(ctxEntry.id, `${ctxEntry.first_name} ${ctxEntry.last_name}`); }}>
                   <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 20 20" fill="none" className="mf-dropdown-item__icon mf-dropdown-item__icon--delete">
