@@ -1,6 +1,7 @@
 import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import { getShopConfig } from "../config.server";
+import { getMetaobjectEntries } from "../lib/metaobject.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
@@ -18,9 +19,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   const config = await getShopConfig(admin);
   const { threshold, creditAmount } = config;
-
-  // Requête paginée pour récupérer TOUTES les commandes avec ce code promo
   const codeUpper = code.toUpperCase();
+
+  // Récupérer tous les codes enregistrés pour construire la même requête OR qu'Analytique
+  // (Shopify retourne des résultats incomplets avec un seul discount_code:X,
+  //  mais retourne tous les ordres affiliés avec une requête OR multi-codes)
+  const allEntriesResult = await getMetaobjectEntries(admin);
+  const allCodes = [...new Set<string>(
+    allEntriesResult.entries
+      .map((e: any) => e.code?.toUpperCase())
+      .filter(Boolean)
+  )];
+
+  const codeQuery = allCodes.length > 0
+    ? allCodes.map(c => `discount_code:${c}`).join(" OR ")
+    : `discount_code:${codeUpper}`;
+
   const orderQuery = `#graphql
     query GetOrdersByCode($qs: String!, $cursor: String) {
       orders(first: 250, query: $qs, after: $cursor) {
@@ -47,14 +61,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   try {
     while (hasMore && pages < maxPages) {
       const resp = await admin.graphql(orderQuery, {
-        variables: { qs: `discount_code:${codeUpper}`, cursor },
+        variables: { qs: codeQuery, cursor },
       });
       const data = await resp.json() as any;
 
       for (const edge of data.data?.orders?.edges || []) {
         const order = edge.node;
         const codes: string[] = order.discountCodes || [];
-        // Vérifier que le code correspond exactement (insensible à la casse)
+        // Filtrer uniquement les commandes qui utilisent exactement le code de ce pro
         if (codes.some((c: string) => c.toUpperCase() === codeUpper)) {
           totalRevenue += parseFloat(order.subtotalPriceSet?.shopMoney?.amount || "0");
           totalOrders++;
