@@ -65,6 +65,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const config = await getShopConfig(adminContext);
 
   const order = payload as any;
+  const shopCurrency: string = order.total_price_set?.shop_money?.currency_code || "EUR";
 
   // Essayer différentes façons d'extraire les codes promo
   const discountCodes = order.discount_codes || [];
@@ -325,7 +326,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             console.error(`[webhook] Permissions Store Credit manquantes — réinstallez l'app avec les bons scopes.`);
           } else {
             const accountId = dAccount.data?.customer?.storeCreditAccounts?.edges?.[0]?.node?.id;
-            if (accountId) {
+            // Si pas de compte trouvé, on tente avec le customer ID directement (crée le compte automatiquement)
+            const creditTargetId = accountId || customerIdValue;
+            if (creditTargetId) {
               const mutationCredit = `#graphql
                 mutation creditStore($id: ID!, $creditInput: StoreCreditAccountCreditInput!) {
                   storeCreditAccountCredit(id: $id, creditInput: $creditInput) {
@@ -335,7 +338,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
                 }
               `;
               const rCredit = await adminContext.graphql(mutationCredit, {
-                variables: { id: accountId, creditInput: { creditAmount: { amount: String(creditsToAdd), currencyCode: "EUR" } } }
+                variables: { id: creditTargetId, creditInput: { creditAmount: { amount: String(creditsToAdd), currencyCode: shopCurrency } } }
               });
               const dCredit = await rCredit.json() as any;
               if (dCredit.data?.storeCreditAccountCredit?.userErrors?.length > 0) {
@@ -345,8 +348,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
                 actualCreditsDeposited = creditsToAdd;
                 finalRemainder = potentialRemainder;
               }
-            } else {
-              console.warn(`[webhook] Pas de compte store credit pour le client ${customerIdValue}`);
             }
           }
         } catch (creditError: any) {

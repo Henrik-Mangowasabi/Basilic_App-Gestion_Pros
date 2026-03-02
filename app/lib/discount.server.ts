@@ -29,7 +29,7 @@ export async function createShopifyDiscount(
           : {
               discountAmount: {
                 amount: data.montant,
-                appliesOnEachItem: false,
+                appliesOnEachItem: true,
               },
             },
         items: { all: true },
@@ -79,7 +79,7 @@ export async function updateShopifyDiscount(
           : {
               discountAmount: {
                 amount: data.montant,
-                appliesOnEachItem: false,
+                appliesOnEachItem: true,
               },
             },
         items: { all: true },
