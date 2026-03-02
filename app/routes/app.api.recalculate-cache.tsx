@@ -1,6 +1,5 @@
 import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
-import { getShopConfig } from "../config.server";
 import { getMetaobjectEntries } from "../lib/metaobject.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -17,8 +16,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
   }
 
-  const config = await getShopConfig(admin);
-  const { threshold, creditAmount } = config;
   const codeUpper = code.toUpperCase();
 
   // Récupérer tous les codes enregistrés pour construire la même requête OR qu'Analytique
@@ -85,15 +82,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
   }
 
-  // Calcul des crédits qui auraient dû être gagnés (sans créditer le store credit)
-  let remainder = totalRevenue;
-  let creditsEarned = 0;
-  while (remainder >= threshold) {
-    creditsEarned += creditAmount;
-    remainder -= threshold;
-  }
-
-  // Mise à jour des champs cache dans le metaobject
+  // On met à jour UNIQUEMENT le CA et le nombre de commandes.
+  // cache_credit_earned et cache_ca_remainder ne sont PAS recalculés :
+  // on ne connaît pas l'historique des paliers/versements précédents.
   const updateResponse = await admin.graphql(`#graphql
     mutation metaobjectUpdate($id: ID!, $metaobject: MetaobjectUpdateInput!) {
       metaobjectUpdate(id: $id, metaobject: $metaobject) {
@@ -108,8 +99,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         fields: [
           { key: "cache_revenue", value: String(totalRevenue) },
           { key: "cache_orders_count", value: String(totalOrders) },
-          { key: "cache_credit_earned", value: String(creditsEarned) },
-          { key: "cache_ca_remainder", value: String(remainder) },
         ],
       },
     },
@@ -129,8 +118,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     success: true,
     totalRevenue,
     totalOrders,
-    creditsEarned,
-    remainder,
   }), {
     headers: { "Content-Type": "application/json" },
   });
