@@ -87,7 +87,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       for (const edge of edges) {
         const c = edge.node;
         const metaValue: string = c.proMeta?.value ?? "";
-        if (metaValue.trim() && metaValue !== "rejeté") {
+        if (metaValue.trim() && metaValue !== "refusé") {
           const addr = c.defaultAddress;
           const adresseMeta = c.adresseMeta?.value || "";
           customers.push({
@@ -170,38 +170,36 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       type,
       profession,
       adresse,
+      customer_id: customerId, // Passer directement le customer_id de la validation
     });
 
     if (!result.success) {
       return { error: result.error || "Erreur création pro" };
     }
 
-    // Delete metafield
+    // Update metafield to "validé"
     try {
-      const deleteMetaMutation = `#graphql
-        mutation metafieldsDelete($metafields: [MetafieldIdentifierInput!]!) {
-          metafieldsDelete(metafields: $metafields) {
-            deletedMetafields {
-              ownerId
-              namespace
-              key
-            }
-            userErrors {
-              field
-              message
-            }
+      const updateMetaMutation = `#graphql
+        mutation customerUpdate($input: CustomerInput!) {
+          customerUpdate(input: $input) {
+            customer { id }
+            userErrors { field message }
           }
         }
       `;
-      await admin.graphql(deleteMetaMutation, {
+      await admin.graphql(updateMetaMutation, {
         variables: {
-          metafields: [
-            {
-              ownerId: customerId,
-              namespace: "custom",
-              key: "pro_en_attente_de_validation",
-            },
-          ],
+          input: {
+            id: customerId,
+            metafields: [
+              {
+                namespace: "custom",
+                key: "pro_en_attente_de_validation",
+                value: "validé",
+                type: "single_line_text_field",
+              },
+            ],
+          },
         },
       });
 
@@ -215,7 +213,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         }
       `, { variables: { id: customerId, tags: ["pro_pending"] } });
     } catch (e) {
-      console.error("Erreur suppression metafield:", e);
+      console.error("Erreur update metafield:", e);
     }
 
     return redirect("/app/validation?success=pro_accepted");
@@ -242,7 +240,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               {
                 namespace: "custom",
                 key: "pro_en_attente_de_validation",
-                value: "rejeté",
+                value: "refusé",
                 type: "single_line_text_field",
               },
             ],
@@ -365,7 +363,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           continue;
         }
 
-        // Clear metafield
+        // Update metafield to "validé"
         const updateMetaMutation = `#graphql
           mutation customerUpdate($input: CustomerInput!) {
             customerUpdate(input: $input) {
@@ -382,7 +380,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
                 {
                   namespace: "custom",
                   key: "pro_en_attente_de_validation",
-                  value: "",
+                  value: "validé",
                   type: "single_line_text_field",
                 },
               ],
@@ -435,7 +433,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
                 {
                   namespace: "custom",
                   key: "pro_en_attente_de_validation",
-                  value: "rejeté",
+                  value: "refusé",
                   type: "single_line_text_field",
                 },
               ],
