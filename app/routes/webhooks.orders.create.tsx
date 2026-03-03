@@ -145,42 +145,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   // Le Scenario BURN est géré automatiquement par Shopify (Checkout) !
   if (usedCode) {
     
-    // Calculer le sous-total AVANT réduction pour le CA généré
+    // CA = sous-total APRÈS réduction, SANS frais de livraison ni taxes
     let orderAmount = 0;
-    
-    // Méthode 1: Calculer depuis les line_items (sous-total avant réduction)
-    if (order.line_items && order.line_items.length > 0) {
-      orderAmount = order.line_items.reduce((sum: number, item: any) => {
-        const price = parseFloat(item.price || item.original_price || "0");
-        const quantity = parseInt(item.quantity || "1");
-        return sum + (price * quantity);
-      }, 0);
-    }
-    // Méthode 2: Sous-total après réduction + montant de la réduction
-    else if (order.subtotal_price_set?.shop_money?.amount) {
-      const subtotalAfterDiscount = parseFloat(String(order.subtotal_price_set.shop_money.amount));
-      let totalDiscount = 0;
-      if (order.discount_codes && order.discount_codes.length > 0) {
-        totalDiscount = order.discount_codes.reduce((sum: number, dc: any) => {
-          return sum + parseFloat(dc.amount || "0");
-        }, 0);
-      }
-      orderAmount = subtotalAfterDiscount + totalDiscount;
-    }
-    // Méthode 3: Fallback - utiliser subtotal_price directement
-    else if (order.subtotal_price) {
-      const subtotalAfterDiscount = parseFloat(String(order.subtotal_price));
-      // Essayer d'ajouter la réduction si disponible
-      let totalDiscount = 0;
-      if (order.discount_codes && order.discount_codes.length > 0) {
-        totalDiscount = order.discount_codes.reduce((sum: number, dc: any) => {
-          return sum + parseFloat(dc.amount || "0");
-        }, 0);
-      }
-      orderAmount = subtotalAfterDiscount + totalDiscount;
-    }
-    // Méthode 4: Fallback - utiliser total_price (moins frais de port et taxes)
-    else if (order.total_price_set?.shop_money?.amount) {
+
+    if (order.subtotal_price_set?.shop_money?.amount) {
+      orderAmount = parseFloat(String(order.subtotal_price_set.shop_money.amount));
+    } else if (order.subtotal_price) {
+      orderAmount = parseFloat(String(order.subtotal_price));
+    } else if (order.total_price_set?.shop_money?.amount) {
       const total = parseFloat(String(order.total_price_set.shop_money.amount));
       const shipping = parseFloat(order.total_shipping_price_set?.shop_money?.amount || order.total_shipping_price || "0");
       const tax = parseFloat(order.total_tax_set?.shop_money?.amount || order.total_tax || "0");
@@ -232,7 +204,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           let cursor: string | null = null;
           let totalChecked = 0;
 
-          while (hasNextPage && !metaobjectNode && totalChecked < 1000) { // On limite à 1000 par sécurité
+          while (hasNextPage && !metaobjectNode && totalChecked < 5000) { // Couverture jusqu'à 5 000 pros
             const listQuery = `#graphql
               query listAll($cursor: String) {
                 metaobjects(first: 250, type: "mm_pro_de_sante", after: $cursor) {

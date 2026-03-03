@@ -76,10 +76,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const profEntriesFiltered = isProfFiltered
     ? entries.filter((e: any) => selectedProfessions.includes(e.profession))
     : entries;
-  // Seulement les pros actifs pour les stats/chart (Shopify retourne les codes en majuscules)
-  const activeEntries = profEntriesFiltered.filter((e: any) => e.status !== false);
+  // Tous les pros (actifs ET inactifs) contribuent au CA total
   const allowedCodes = new Set<string>(
-    activeEntries.map((e: any) => e.code?.toUpperCase()).filter(Boolean)
+    profEntriesFiltered.map((e: any) => e.code?.toUpperCase()).filter(Boolean)
   );
 
   let stats = {
@@ -105,7 +104,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           edges {
             node {
               createdAt
-              totalPriceSet {
+              subtotalPriceSet {
                 shopMoney {
                   amount
                 }
@@ -122,10 +121,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     `;
 
     try {
-      let hasNextPage = true;
-      let cursor = null;
-      let pagesLoaded = 0;
-      const maxPages = 4; // On limite à 1000 commandes (4x250) pour garder une page rapide
       const filteredMonthlyMap = new Map<string, { month: string; count: number; ghost?: boolean }>();
 
       // Toujours afficher les 6 derniers mois à partir d'aujourd'hui
@@ -143,57 +138,65 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         filteredMonthlyMap.set(mk, { month: MONTH_ABBR[d.getMonth()], count: 0, ghost: !isInRange });
       }
 
-      // Requête ciblée sur les codes affiliés dans la fenêtre de 6 mois
-      const codeFilterStr = [...allowedCodes].map(c => `discount_code:${c}`).join(" OR ");
-      const extendedQueryString = codeFilterStr
-        ? `created_at:>=${windowBeginStr} AND (${codeFilterStr})`
-        : `created_at:>=${windowBeginStr} AND discount_code:*`;
+      // Requête par lots de 50 codes (scalable à 2 000+ pros)
+      const allCodesFiltered = [...allowedCodes];
+      for (let bi = 0; bi < allCodesFiltered.length; bi += 50) {
+        const batch = allCodesFiltered.slice(bi, bi + 50);
+        const batchSet = new Set(batch);
+        const batchCodeFilter = batch.map(c => `discount_code:${c}`).join(" OR ");
+        const extendedQueryString = `created_at:>=${windowBeginStr} AND (${batchCodeFilter})`;
 
-      while (hasNextPage && pagesLoaded < maxPages) {
-        const response = await admin.graphql(query, { // eslint-disable-line @typescript-eslint/no-explicit-any
-          variables: { queryString: extendedQueryString, cursor },
-        });
-        const data = await response.json() as any; // eslint-disable-line @typescript-eslint/no-explicit-any
-        const ordersEdges = data.data?.orders?.edges || [];
+        let hasNextPage = true;
+        let cursor = null;
+        let pagesLoaded = 0;
+        const maxPages = 4; // 1 000 commandes max par lot
 
-        ordersEdges.forEach((edge: any) => {
-          const order = edge.node;
-          const createdAt = new Date(order.createdAt);
-          const revenue = parseFloat(order.totalPriceSet.shopMoney.amount);
-          const codesUsed = order.discountCodes || [];
+        while (hasNextPage && pagesLoaded < maxPages) {
+          const response = await admin.graphql(query, { // eslint-disable-line @typescript-eslint/no-explicit-any
+            variables: { queryString: extendedQueryString, cursor },
+          });
+          const data = await response.json() as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+          const ordersEdges = data.data?.orders?.edges || [];
 
-          // Date de la commande en format YYYY-MM-DD pour comparaison
-          const orderDateStr = `${createdAt.getFullYear()}-${String(createdAt.getMonth() + 1).padStart(2, "0")}-${String(createdAt.getDate()).padStart(2, "0")}`;
-          const isInFilterRange = orderDateStr >= (startDateStr ?? "") && orderDateStr <= (endDateStr ?? "9999-12-31");
+          ordersEdges.forEach((edge: any) => {
+            const order = edge.node;
+            const createdAt = new Date(order.createdAt);
+            const revenue = parseFloat(order.subtotalPriceSet.shopMoney.amount);
+            const codesUsed = order.discountCodes || [];
 
-          // proStats et stats.totalOrders : uniquement pour les commandes dans la plage filtrée
-          if (isInFilterRange && codesUsed.length > 0) {
-            codesUsed.filter((c: string) => allowedCodes.has(c.toUpperCase())).forEach((code: string) => {
-              const key = code.toUpperCase();
-              const current = proStats.get(key) || { revenue: 0, count: 0 };
-              proStats.set(key, {
-                revenue: current.revenue + revenue,
-                count: current.count + 1,
+            // Date de la commande en format YYYY-MM-DD pour comparaison
+            const orderDateStr = `${createdAt.getFullYear()}-${String(createdAt.getMonth() + 1).padStart(2, "0")}-${String(createdAt.getDate()).padStart(2, "0")}`;
+            const isInFilterRange = orderDateStr >= (startDateStr ?? "") && orderDateStr <= (endDateStr ?? "9999-12-31");
+
+            // proStats et stats.totalOrders : uniquement codes du lot courant dans la plage filtrée
+            if (isInFilterRange) {
+              codesUsed.filter((c: string) => batchSet.has(c.toUpperCase())).forEach((code: string) => {
+                const key = code.toUpperCase();
+                const current = proStats.get(key) || { revenue: 0, count: 0 };
+                proStats.set(key, {
+                  revenue: current.revenue + revenue,
+                  count: current.count + 1,
+                });
+                stats.totalRevenue += revenue;
+                stats.totalOrders += 1;
               });
-              stats.totalRevenue += revenue;
-              stats.totalOrders += 1;
-            });
-          }
+            }
 
-          // Chart : toutes les commandes (ghost + actives), filtrées par pros enregistrés
-          const relevantChartCodes = codesUsed.filter((c: string) => allowedCodes.has(c.toUpperCase()));
-          if (relevantChartCodes.length > 0) {
-            const mk = `${createdAt.getFullYear()}-${String(createdAt.getMonth() + 1).padStart(2, "0")}`;
-            const isGhost = filteredMonthlyMap.get(mk)?.ghost ?? !isInFilterRange;
-            const ex = filteredMonthlyMap.get(mk) || { month: MONTH_ABBR[createdAt.getMonth()], count: 0, ghost: isGhost };
-            filteredMonthlyMap.set(mk, { ...ex, count: ex.count + 1 });
-          }
-        });
+            // Chart : commandes du lot courant (ghost + actives)
+            const relevantChartCodes = codesUsed.filter((c: string) => batchSet.has(c.toUpperCase()));
+            if (relevantChartCodes.length > 0) {
+              const mk = `${createdAt.getFullYear()}-${String(createdAt.getMonth() + 1).padStart(2, "0")}`;
+              const isGhost = filteredMonthlyMap.get(mk)?.ghost ?? !isInFilterRange;
+              const ex = filteredMonthlyMap.get(mk) || { month: MONTH_ABBR[createdAt.getMonth()], count: 0, ghost: isGhost };
+              filteredMonthlyMap.set(mk, { ...ex, count: ex.count + 1 });
+            }
+          });
 
-        const pageInfo = data.data?.orders?.pageInfo as any; // eslint-disable-line @typescript-eslint/no-explicit-any
-        hasNextPage = pageInfo?.hasNextPage;
-        cursor = pageInfo?.endCursor;
-        pagesLoaded++;
+          const pageInfo = data.data?.orders?.pageInfo as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+          hasNextPage = pageInfo?.hasNextPage;
+          cursor = pageInfo?.endCursor;
+          pagesLoaded++;
+        }
       }
 
       chartData = [...filteredMonthlyMap.entries()]
@@ -238,7 +241,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             edges {
               node {
                 createdAt
-                totalPriceSet { shopMoney { amount } }
+                subtotalPriceSet { shopMoney { amount } }
                 discountCodes
               }
             }
@@ -246,10 +249,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           }
         }
       `;
-      // Requête ciblée : seulement les commandes avec un code affilié
-      const codeQuery = [...allowedCodes].map(c => `discount_code:${c}`).join(" OR ");
-      if (!codeQuery) {
-        // Aucun pro actif, pas besoin de requêter
+      // Requête par lots de 50 codes (scalable à 2 000+ pros)
+      if (allowedCodes.size === 0) {
+        // Aucun code affilié, pas besoin de requêter
         chartData = [...monthlyMap.entries()]
           .sort(([a], [b]) => a.localeCompare(b))
           .map(([k, v]) => ({ ...v, key: k }));
@@ -273,36 +275,42 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           shopDomain,
         };
       }
-      let hasMore = true;
-      let cursor: string | null = null;
-      let pages = 0;
-      const maxPages = 20; // 5000 commandes max
-      while (hasMore && pages < maxPages) {
-        const resp = await admin.graphql(liveQuery, { // eslint-disable-line @typescript-eslint/no-explicit-any
-          variables: { qs: codeQuery, cursor },
-        });
-        const mData = await resp.json() as any; // eslint-disable-line @typescript-eslint/no-explicit-any
-        for (const edge of mData.data?.orders?.edges || []) {
-          const edgeCodes: string[] = edge.node.discountCodes || [];
-          const relevantCodes = edgeCodes.filter((c: string) => allowedCodes.has(c.toUpperCase()));
-          if (relevantCodes.length > 0) {
-            const revenue = parseFloat(edge.node.totalPriceSet.shopMoney.amount);
-            const createdAt = new Date(edge.node.createdAt);
-            // Stats totales par pro
-            relevantCodes.forEach((code: string) => {
-              const key = code.toUpperCase();
-              const cur = proStatsTotal.get(key) || { revenue: 0, count: 0 };
-              proStatsTotal.set(key, { revenue: cur.revenue + revenue, count: cur.count + 1 });
-            });
-            // Sparkline 6 derniers mois
-            const mk = `${createdAt.getFullYear()}-${String(createdAt.getMonth() + 1).padStart(2, "0")}`;
-            const ex = monthlyMap.get(mk);
-            if (ex) monthlyMap.set(mk, { ...ex, count: ex.count + 1 });
+      const allCodesDefault = [...allowedCodes];
+      for (let bi = 0; bi < allCodesDefault.length; bi += 50) {
+        const batch = allCodesDefault.slice(bi, bi + 50);
+        const batchSet = new Set(batch);
+        const batchQuery = batch.map(c => `discount_code:${c}`).join(" OR ");
+        let hasMore = true;
+        let cursor: string | null = null;
+        let pages = 0;
+        const maxPages = 8; // 2 000 commandes max par lot
+        while (hasMore && pages < maxPages) {
+          const resp = await admin.graphql(liveQuery, { // eslint-disable-line @typescript-eslint/no-explicit-any
+            variables: { qs: batchQuery, cursor },
+          });
+          const mData = await resp.json() as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+          for (const edge of mData.data?.orders?.edges || []) {
+            const edgeCodes: string[] = edge.node.discountCodes || [];
+            const relevantCodes = edgeCodes.filter((c: string) => batchSet.has(c.toUpperCase()));
+            if (relevantCodes.length > 0) {
+              const revenue = parseFloat(edge.node.subtotalPriceSet.shopMoney.amount);
+              const createdAt = new Date(edge.node.createdAt);
+              // Stats totales par pro
+              relevantCodes.forEach((code: string) => {
+                const key = code.toUpperCase();
+                const cur = proStatsTotal.get(key) || { revenue: 0, count: 0 };
+                proStatsTotal.set(key, { revenue: cur.revenue + revenue, count: cur.count + 1 });
+              });
+              // Sparkline 6 derniers mois
+              const mk = `${createdAt.getFullYear()}-${String(createdAt.getMonth() + 1).padStart(2, "0")}`;
+              const ex = monthlyMap.get(mk);
+              if (ex) monthlyMap.set(mk, { ...ex, count: ex.count + 1 });
+            }
           }
+          hasMore = !!mData.data?.orders?.pageInfo?.hasNextPage;
+          cursor = mData.data?.orders?.pageInfo?.endCursor ?? null;
+          pages++;
         }
-        hasMore = !!mData.data?.orders?.pageInfo?.hasNextPage;
-        cursor = mData.data?.orders?.pageInfo?.endCursor ?? null;
-        pages++;
       }
     } catch (e) {
       console.error("Erreur stats live analytique:", e);
@@ -471,13 +479,23 @@ export default function AnalytiquePage() {
     ? Math.round(((stats.activePros ?? 0) / stats.totalPros) * 100)
     : 0;
 
-  const activeMonths = chartData.filter(d => !d.ghost);
+  const PERIOD_MONTHS_ABBR = ["JAN.","FÉV.","MAR.","AVR.","MAI","JUIN","JUIL.","AOÛ.","SEPT.","OCT.","NOV.","DÉC."];
   const periodLabel = stats?.isDateFiltered
-    ? activeMonths.length > 1
-      ? `${activeMonths[0].month} – ${activeMonths[activeMonths.length - 1].month}`
-      : activeMonths.length === 1
-        ? activeMonths[0].month
-        : "Commandes sur la période"
+    ? (() => {
+        const sd = filters.startDate;
+        const ed = filters.endDate;
+        if (sd && ed) {
+          const s = new Date(sd + "T00:00:00");
+          const e = new Date(ed + "T00:00:00");
+          if (e < s) return "Période invalide";
+          const sm = PERIOD_MONTHS_ABBR[s.getMonth()];
+          const em = PERIOD_MONTHS_ABBR[e.getMonth()];
+          return s.getFullYear() === e.getFullYear() && s.getMonth() === e.getMonth() ? sm : `${sm} – ${em}`;
+        }
+        if (sd) return `À partir de ${PERIOD_MONTHS_ABBR[new Date(sd + "T00:00:00").getMonth()]}`;
+        if (ed) return `Jusqu'à ${PERIOD_MONTHS_ABBR[new Date(ed + "T00:00:00").getMonth()]}`;
+        return "Commandes sur la période";
+      })()
     : "Nombre de commandes par affiliation";
 
   const moisParams = new URLSearchParams();
@@ -606,10 +624,13 @@ export default function AnalytiquePage() {
               className="an-filter-date"
               onChange={(e) => {
                 const val = e.target.value;
+                // Si la nouvelle date de début dépasse la date de fin, reset la fin
+                const newEnd = (val && endDate && val > endDate) ? "" : endDate;
+                if (newEnd !== endDate) setEndDate(newEnd);
                 setStartDate(val);
                 const p = new URLSearchParams();
                 if (val) p.set("startDate", val);
-                if (endDate) p.set("endDate", endDate);
+                if (newEnd) p.set("endDate", newEnd);
                 selectedProfs.forEach(s => p.append("profession", s));
                 navigate(`/app/analytique?${p.toString()}`);
               }}
@@ -624,9 +645,12 @@ export default function AnalytiquePage() {
               className="an-filter-date"
               onChange={(e) => {
                 const val = e.target.value;
+                // Si la nouvelle date de fin est avant la date de début, reset le début
+                const newStart = (val && startDate && val < startDate) ? "" : startDate;
+                if (newStart !== startDate) setStartDate(newStart);
                 setEndDate(val);
                 const p = new URLSearchParams();
-                if (startDate) p.set("startDate", startDate);
+                if (newStart) p.set("startDate", newStart);
                 if (val) p.set("endDate", val);
                 selectedProfs.forEach(s => p.append("profession", s));
                 navigate(`/app/analytique?${p.toString()}`);

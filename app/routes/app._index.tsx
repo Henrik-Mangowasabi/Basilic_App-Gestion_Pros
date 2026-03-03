@@ -73,30 +73,39 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     const creditBalanceMap = new Map<string, number>();
 
     if (customerIds.length > 0) {
-      try {
-        const response = await admin.graphql(
-          `#graphql
-          query getCustomersData($ids: [ID!]!) {
-            nodes(ids: $ids) {
-              ... on Customer {
-                id
-                tags
-                storeCreditAccounts(first: 1) {
-                  edges {
-                    node {
-                      balance {
-                        amount
-                      }
+      // Shopify nodes() accepte max 250 IDs par requête → on chunk
+      const NODES_CHUNK = 250;
+      const customerChunks: string[][] = [];
+      for (let i = 0; i < customerIds.length; i += NODES_CHUNK) {
+        customerChunks.push(customerIds.slice(i, i + NODES_CHUNK));
+      }
+      const getCustomersDataQuery = `#graphql
+        query getCustomersData($ids: [ID!]!) {
+          nodes(ids: $ids) {
+            ... on Customer {
+              id
+              tags
+              storeCreditAccounts(first: 1) {
+                edges {
+                  node {
+                    balance {
+                      amount
                     }
                   }
                 }
               }
             }
-          }`,
-          { variables: { ids: customerIds } },
+          }
+        }`;
+      try {
+        const chunkResults = await Promise.all(
+          customerChunks.map(async (chunk) => {
+            const response = await admin.graphql(getCustomersDataQuery, { variables: { ids: chunk } });
+            const { data } = await response.json();
+            return data?.nodes || [];
+          }),
         );
-        const { data } = await response.json();
-        const nodes = data?.nodes || [];
+        const nodes = chunkResults.flat();
         nodes.forEach((node: any) => {
           if (node && node.id) {
             tagsMap.set(node.id, node.tags || []);
@@ -814,26 +823,13 @@ function ImportResult({ report }: { report: any }) {
       <div className="import-result__header">
         <span className="import-result__title">Rapport d&apos;import</span>
         <div className="import-result__stats">
-          <div className="import-result__stat--added">✅ {report.added} importés</div>
-          <div className="import-result__stat--skipped">⚠️ {report.skipped} doublons</div>
+          {report.added > 0 && <div className="import-result__stat--added">✅ {report.added} créés</div>}
+          {report.updated > 0 && <div className="import-result__stat--skipped">🔄 {report.updated} mis à jour</div>}
           {report.errors.length > 0 && (
             <div className="import-result__stat--error">❌ {report.errors.length} erreurs</div>
           )}
         </div>
       </div>
-
-      {report.duplicates.length > 0 && (
-        <details className="import-result__details">
-          <summary className="import-result__summary">
-            Voir les doublons ({report.duplicates.length})
-          </summary>
-          <ul className="import-result__list">
-            {report.duplicates.map((d: string, i: number) => (
-              <li key={i}>{d}</li>
-            ))}
-          </ul>
-        </details>
-      )}
 
       {report.errors.length > 0 && (
         <details open>
@@ -907,16 +903,15 @@ function ImportForm({ existingEntries, onClose }: { existingEntries: any[]; onCl
     setReport(null);
 
     let added = 0;
-    let skipped = 0;
-    let duplicates: string[] = [];
+    let updated = 0;
     let errors: string[] = [];
 
-    // Préparation Sets Locaux pour check rapide
-    const existingCodes = new Set(
-      existingEntries.map((e: any) => e.code?.toLowerCase().trim()),
+    // Map code → entry existante pour l'upsert
+    const existingByCode = new Map(
+      existingEntries.map((e: any) => [e.code?.toLowerCase().trim(), e]),
     );
-    const existingRefs = new Set(
-      existingEntries.map((e: any) => e.identification?.toLowerCase().trim()),
+    const existingByRef = new Map(
+      existingEntries.map((e: any) => [e.identification?.toLowerCase().trim(), e]),
     );
 
     const itemsToProcess = [];
@@ -991,16 +986,11 @@ function ImportForm({ existingEntries, onClose }: { existingEntries: any[]; onCl
         const prefix = ((first_name.slice(0, 2) + last_name.slice(0, 2)).toUpperCase() || "XX");
         ref = `${prefix}${Date.now().toString(36).slice(-4).toUpperCase()}`;
       }
-      if (existingCodes.has(code.toLowerCase())) {
-        skipped++;
-        duplicates.push(`${displayName} (Code existant: ${code})`);
-        continue;
-      }
-      if (existingRefs.has(ref.toLowerCase())) {
-        skipped++;
-        duplicates.push(`${displayName} (Ref existante: ${ref})`);
-        continue;
-      }
+      // Chercher si une entrée existante correspond (par code ou par ref)
+      const existingEntry =
+        existingByCode.get(code.toLowerCase()) ||
+        existingByRef.get(ref.toLowerCase()) ||
+        null;
 
       itemsToProcess.push({
         identification: ref,
@@ -1012,6 +1002,7 @@ function ImportForm({ existingEntries, onClose }: { existingEntries: any[]; onCl
         type,
         profession,
         adresse,
+        existingId: existingEntry?.id || null,
       });
     }
 
@@ -1026,8 +1017,10 @@ function ImportForm({ existingEntries, onClose }: { existingEntries: any[]; onCl
       // Traitement parallèle du batch
       const batchPromises = batch.map(async (item) => {
         const fd = new FormData();
-        fd.append("action", "api_create_partner");
-        Object.keys(item).forEach((k) => fd.append(k, (item as any)[k]));
+        Object.keys(item).forEach((k) => {
+          const v = (item as any)[k];
+          if (v !== null && v !== undefined) fd.append(k, String(v));
+        });
 
         try {
           const res = await fetch("/app/api/import", {
@@ -1043,9 +1036,10 @@ function ImportForm({ existingEntries, onClose }: { existingEntries: any[]; onCl
           const json = await res.json();
 
           if (json.success) {
-            added++;
-            existingCodes.add(item.code.toLowerCase());
-            existingRefs.add(item.identification.toLowerCase());
+            if (json.updated) updated++;
+            else added++;
+            existingByCode.set(item.code.toLowerCase(), item);
+            existingByRef.set(item.identification.toLowerCase(), item);
             return { success: true, item };
           } else {
             let niceError = String(json.error);
@@ -1075,7 +1069,7 @@ function ImportForm({ existingEntries, onClose }: { existingEntries: any[]; onCl
     }
 
     setIsProcessing(false);
-    setReport({ added, skipped, duplicates, errors });
+    setReport({ added, updated, errors });
 
     // Retourner un flag pour que le composant parent revalide
     return added;
@@ -1165,6 +1159,172 @@ function ImportForm({ existingEntries, onClose }: { existingEntries: any[]; onCl
         </button>
       </div>
     </>
+  );
+}
+
+// --- BOUTON RECALCUL ENTRÉE INDIVIDUELLE ---
+function RecalculateSingleButton({ entry, onDone }: { entry: any; onDone: () => void }) {
+  const [loading, setLoading] = useState(false);
+  const revalidator = useRevalidator();
+
+  const handleClick = async () => {
+    setLoading(true);
+    const fd = new FormData();
+    fd.append("metaobjectId", entry.id);
+    fd.append("code", entry.code);
+    if (entry.customer_id) fd.append("customerId", entry.customer_id);
+    try {
+      await fetch("/app/api/recalculate-cache", { method: "POST", body: fd });
+    } finally {
+      setLoading(false);
+      indexCache = null;
+      revalidator.revalidate();
+      onDone();
+    }
+  };
+
+  return (
+    <button type="button" className="mf-dropdown-item" onClick={handleClick} disabled={loading}>
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 20 20" fill="currentColor" className="mf-dropdown-item__icon">
+        <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
+      </svg>
+      <span className="mf-dropdown-item__title">{loading ? "Recalcul..." : "Recalculer le CA"}</span>
+    </button>
+  );
+}
+
+// --- COMPOSANT RECALCUL CACHE ---
+function RecalculateCacheModal({ entries, onClose }: { entries: any[]; onClose: () => void }) {
+  const [phase, setPhase] = useState<"idle" | "fetching" | "updating">("idle");
+  const [progress, setProgress] = useState(0);
+  const [errors, setErrors] = useState<string[]>([]);
+  const [done, setDone] = useState(false);
+  const revalidator = useRevalidator();
+  const modalRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(modalRef, true, onClose);
+
+  const entriesWithCode = entries.filter((e) => e.code);
+  const total = entriesWithCode.length;
+  const isRunning = phase !== "idle";
+
+  const runAll = async () => {
+    setPhase("fetching");
+    setProgress(0);
+    setErrors([]);
+    setDone(false);
+    const errs: string[] = [];
+
+    // Phase 1 : récupérer toutes les stats en une seule passe (lots de 50 codes)
+    let precomputedStats: Record<string, { revenue: number; count: number }> = {};
+    try {
+      const res = await fetch("/app/api/recalculate-stats", { method: "POST" });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success) precomputedStats = json.stats;
+      }
+    } catch (e) {
+      console.warn("[RecalculateModal] Phase 1 échec, fallback sans pré-calcul:", e);
+    }
+
+    // Phase 2 : mettre à jour chaque pro en parallèle (5 à la fois)
+    setPhase("updating");
+    const CONCURRENCY = 5;
+    for (let i = 0; i < entriesWithCode.length; i += CONCURRENCY) {
+      const chunk = entriesWithCode.slice(i, i + CONCURRENCY);
+      await Promise.all(chunk.map(async (entry: any) => {
+        const fd = new FormData();
+        fd.append("metaobjectId", entry.id);
+        fd.append("code", entry.code);
+        if (entry.customer_id) fd.append("customerId", entry.customer_id);
+        const codeUpper = entry.code.toUpperCase();
+        const preStats = precomputedStats[codeUpper];
+        if (preStats) {
+          fd.append("preRevenue", String(preStats.revenue));
+          fd.append("preCount", String(preStats.count));
+        }
+        try {
+          const res = await fetch("/app/api/recalculate-cache", { method: "POST", body: fd });
+          if (!res.ok) errs.push(`${entry.first_name || ""} ${entry.last_name || ""}: HTTP ${res.status}`);
+          else {
+            const json = await res.json();
+            if (!json.success) errs.push(`${entry.first_name || ""} ${entry.last_name || ""}: ${json.error}`);
+          }
+        } catch (e) {
+          errs.push(`${entry.first_name || ""} ${entry.last_name || ""}: ${String(e)}`);
+        }
+      }));
+      setProgress(Math.min(i + CONCURRENCY, entriesWithCode.length));
+    }
+
+    setErrors(errs);
+    setPhase("idle");
+    setDone(true);
+    indexCache = null;
+    revalidator.revalidate();
+  };
+
+  return (
+    <div role="presentation" className="bsl-modal" onClick={(e) => { if (e.target === e.currentTarget && !isRunning) onClose(); }}>
+      <div ref={modalRef} role="dialog" aria-modal="true" aria-label="Recalculer le cache CA" className="bsl-modal__dialog bsl-modal__dialog--md">
+        <div className="bsl-modal__header">
+          <h2 className="bsl-modal__title">Recalculer le cache CA</h2>
+          <button type="button" onClick={onClose} disabled={isRunning} className="bsl-modal__close">✕</button>
+        </div>
+        <div className="bsl-modal__body--import">
+          {!done && phase === "idle" && (
+            <p style={{ fontSize: "14px", color: "#555", margin: 0 }}>
+              Cette opération va recalculer les statistiques de chiffre d&apos;affaires pour <strong>{total} partenaire{total > 1 ? "s" : ""}</strong> en interrogeant l&apos;historique complet des commandes Shopify.
+              <br /><br />
+              <strong style={{ color: "#008060" }}>Aucun store credit ne sera crédité</strong> — seuls les compteurs de cache (CA, commandes) seront mis à jour.
+            </p>
+          )}
+          {isRunning && (
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              <p style={{ fontSize: "14px", color: "#555", margin: 0 }}>
+                {phase === "fetching"
+                  ? "Préparation des statistiques..."
+                  : <>Traitement en cours... <strong>{progress} / {total}</strong></>
+                }
+              </p>
+              <div style={{ background: "#e8f5f1", borderRadius: "8px", height: "10px", overflow: "hidden" }}>
+                <div style={{ background: "#008060", height: "100%", width: `${phase === "fetching" ? 5 : (total > 0 ? 5 + (progress / total) * 95 : 100)}%`, transition: "width 0.3s ease" }} />
+              </div>
+            </div>
+          )}
+          {done && (
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+              <p style={{ fontSize: "14px", color: "#008060", fontWeight: 600, margin: 0 }}>
+                Recalcul terminé : {total - errors.length} mis à jour{errors.length > 0 ? `, ${errors.length} erreur(s)` : ""}.
+              </p>
+              {errors.length > 0 && (
+                <details>
+                  <summary style={{ fontSize: "13px", color: "#d82c0d", cursor: "pointer" }}>Voir les erreurs ({errors.length})</summary>
+                  <ul style={{ fontSize: "12px", color: "#d82c0d", margin: "4px 0 0 16px", padding: 0 }}>
+                    {errors.map((e, i) => <li key={i}>{e}</li>)}
+                  </ul>
+                </details>
+              )}
+            </div>
+          )}
+        </div>
+        <div className="bsl-modal__footer">
+          <button type="button" onClick={onClose} disabled={isRunning} className="bsl-modal__btn bsl-modal__btn--cancel">
+            {done ? "Fermer" : "Annuler"}
+          </button>
+          {!done && (
+            <button
+              type="button"
+              onClick={runAll}
+              disabled={isRunning || total === 0}
+              className="bsl-modal__btn bsl-modal__btn--primary"
+              style={{ background: isRunning || total === 0 ? "var(--color-gray-300)" : "#008060", cursor: isRunning || total === 0 ? "not-allowed" : "pointer", color: isRunning || total === 0 ? "var(--color-gray-500)" : "white" }}
+            >
+              {isRunning ? <><Spinner /> {phase === "fetching" ? "Préparation..." : "Traitement..."}</> : "Recalculer le cache"}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1452,6 +1612,7 @@ export default function Index() {
   const isInitializing = nav.formData?.get("action") === "create_structure";
 
   const [showImport, setShowImport] = useState(false);
+  const [showRecalculate, setShowRecalculate] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [sortConfig, setSortConfig] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
@@ -1708,6 +1869,11 @@ export default function Index() {
         </div>
       )}
 
+      {/* MODALE RECALCUL CACHE */}
+      {showRecalculate && (
+        <RecalculateCacheModal entries={entries} onClose={() => setShowRecalculate(false)} />
+      )}
+
       {status.exists ? (
         <div className="page-container" onClick={() => setContextMenuState(null)}>
 
@@ -1783,6 +1949,19 @@ export default function Index() {
             <div className="table-card__header">
               <span className="table-card__title">Liste des Partenaires ({entries.length})</span>
               <div className="table-header-actions">
+                {showCABlock && (
+                  <button
+                    type="button"
+                    className="btn btn--secondary table-card__new-btn"
+                    onClick={() => setShowRecalculate(true)}
+                    title="Recalculer le cache CA depuis l'historique des commandes"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
+                    </svg>
+                    Recalculer
+                  </button>
+                )}
                 <button
                   type="button"
                   className={`btn btn--secondary table-card__new-btn${showImport ? " btn--secondary-active" : ""}`}
@@ -2040,6 +2219,9 @@ export default function Index() {
                   </svg>
                   <span className="mf-dropdown-item__title">Editer</span>
                 </button>
+                {showCABlock && ctxEntry.code && (
+                  <RecalculateSingleButton entry={ctxEntry} onDone={() => setContextMenuState(null)} />
+                )}
                 <button type="button" className="mf-dropdown-item mf-dropdown-item--delete"
                   onClick={() => { setContextMenuState(null); handleDeleteEntry(ctxEntry.id, `${ctxEntry.first_name} ${ctxEntry.last_name}`); }}>
                   <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 20 20" fill="none" className="mf-dropdown-item__icon mf-dropdown-item__icon--delete">

@@ -7,12 +7,6 @@ function cleanEmail(email: string) {
   return email ? email.trim().toLowerCase() : "";
 }
 
-// Cette fonction n'est plus utilisée par la nouvelle version optimisée, 
-// mais on la garde pour éviter les erreurs d'import si elle est appelée ailleurs.
-export async function getProSanteCustomers(admin: AdminApiContext) {
-  return [];
-}
-
 export async function createCustomerMetafieldDefinitions(admin: AdminApiContext) {
   const mutation = `
     mutation metafieldDefinitionCreate($definition: MetafieldDefinitionInput!) {

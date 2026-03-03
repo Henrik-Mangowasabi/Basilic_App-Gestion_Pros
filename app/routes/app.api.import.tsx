@@ -1,12 +1,13 @@
 import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
-import { createMetaobjectEntry } from "../lib/metaobject.server";
+import { createMetaobjectEntry, updateMetaobjectEntry } from "../lib/metaobject.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
   const formData = await request.formData();
 
-  const identification = String(formData.get("identification"));
+  const existingId = formData.get("existingId") as string | null;
+  const identification = String(formData.get("identification") || "");
   const first_name = String(formData.get("first_name") || "");
   const last_name = String(formData.get("last_name") || "");
   const email = String(formData.get("email") || "");
@@ -15,6 +16,23 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const type = String(formData.get("type") || "%");
   const profession = String(formData.get("profession") || "");
   const adresse = String(formData.get("adresse") || "");
+
+  // Upsert : si un ID existant est fourni → update, sinon → create
+  if (existingId) {
+    const result = await updateMetaobjectEntry(admin, existingId, {
+      first_name,
+      last_name,
+      email,
+      code,
+      montant,
+      type,
+      profession,
+      adresse,
+    });
+    return new Response(JSON.stringify({ ...result, updated: true }), {
+      headers: { "Content-Type": "application/json" },
+    });
+  }
 
   const result = await createMetaobjectEntry(admin, {
     identification,
