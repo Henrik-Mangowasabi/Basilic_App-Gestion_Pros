@@ -623,15 +623,37 @@ export async function updateMetaobjectEntry(
         error: d.data.metaobjectUpdate.userErrors[0].message,
       };
 
-    // Mise à jour metafield code_promo si le code a changé
-    const codeChanged = fields.code && fields.code !== oldData.code;
-    if (codeChanged && oldData.customer_id) {
+    // Mise à jour metafields client si nécessaire
+    if (oldData.customer_id) {
+      const metafieldsToUpdate: { namespace: string; key: string; value: string; type: string }[] = [];
+
+      // code_promo si le code a changé
+      const codeChanged = fields.code && fields.code !== oldData.code;
+      if (codeChanged) {
+        metafieldsToUpdate.push({
+          namespace: "custom", key: "code_promo",
+          value: String(mergedCode), type: "single_line_text_field",
+        });
+      }
+
+      // pro_en_attente_de_validation → "validé" (toujours s'assurer que c'est à jour)
+      metafieldsToUpdate.push({
+        namespace: "custom", key: "pro_en_attente_de_validation",
+        value: "validé", type: "single_line_text_field",
+      });
+
       try {
-        await updateCustomerProMetafields(admin, oldData.customer_id, {
-          code_promo: String(mergedCode),
+        const mfMutation = `mutation customerUpdate($input: CustomerInput!) { customerUpdate(input: $input) { userErrors { field message } } }`;
+        await admin.graphql(mfMutation, {
+          variables: {
+            input: {
+              id: oldData.customer_id,
+              metafields: metafieldsToUpdate,
+            },
+          },
         });
       } catch (mfErr) {
-        console.warn("⚠️ [CLIENT] Metafield code_promo non mis à jour (non-bloquant):", mfErr);
+        console.warn("⚠️ [CLIENT] Metafields non mis à jour (non-bloquant):", mfErr);
       }
     }
 

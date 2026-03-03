@@ -104,11 +104,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           edges {
             node {
               createdAt
-              subtotalPriceSet {
-                shopMoney {
-                  amount
-                }
-              }
+              subtotalPriceSet { shopMoney { amount } }
+              totalRefundedSet { shopMoney { amount } }
+              totalRefundedShippingSet { shopMoney { amount } }
               discountCodes
             }
           }
@@ -144,7 +142,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         const batch = allCodesFiltered.slice(bi, bi + 50);
         const batchSet = new Set(batch);
         const batchCodeFilter = batch.map(c => `discount_code:${c}`).join(" OR ");
-        const extendedQueryString = `created_at:>=${windowBeginStr} AND (${batchCodeFilter})`;
+        const extendedQueryString = `created_at:>=${windowBeginStr} -financial_status:refunded -financial_status:voided -status:cancelled AND (${batchCodeFilter})`;
 
         let hasNextPage = true;
         let cursor = null;
@@ -161,7 +159,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           ordersEdges.forEach((edge: any) => {
             const order = edge.node;
             const createdAt = new Date(order.createdAt);
-            const revenue = parseFloat(order.subtotalPriceSet.shopMoney.amount);
+            const subtotal = parseFloat(order.subtotalPriceSet?.shopMoney?.amount || "0");
+            const totalRefunded = parseFloat(order.totalRefundedSet?.shopMoney?.amount || "0");
+            const shippingRefunded = parseFloat(order.totalRefundedShippingSet?.shopMoney?.amount || "0");
+            const productRefunded = Math.max(0, totalRefunded - shippingRefunded);
+            const revenue = Math.max(0, subtotal - productRefunded);
             const codesUsed = order.discountCodes || [];
 
             // Date de la commande en format YYYY-MM-DD pour comparaison
@@ -242,6 +244,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
               node {
                 createdAt
                 subtotalPriceSet { shopMoney { amount } }
+                totalRefundedSet { shopMoney { amount } }
+                totalRefundedShippingSet { shopMoney { amount } }
                 discountCodes
               }
             }
@@ -279,7 +283,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       for (let bi = 0; bi < allCodesDefault.length; bi += 50) {
         const batch = allCodesDefault.slice(bi, bi + 50);
         const batchSet = new Set(batch);
-        const batchQuery = batch.map(c => `discount_code:${c}`).join(" OR ");
+        const batchQuery = `-financial_status:refunded -financial_status:voided -status:cancelled AND (${batch.map(c => `discount_code:${c}`).join(" OR ")})`;
         let hasMore = true;
         let cursor: string | null = null;
         let pages = 0;
@@ -293,7 +297,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             const edgeCodes: string[] = edge.node.discountCodes || [];
             const relevantCodes = edgeCodes.filter((c: string) => batchSet.has(c.toUpperCase()));
             if (relevantCodes.length > 0) {
-              const revenue = parseFloat(edge.node.subtotalPriceSet.shopMoney.amount);
+              const subtotal = parseFloat(edge.node.subtotalPriceSet?.shopMoney?.amount || "0");
+              const totalRefunded = parseFloat(edge.node.totalRefundedSet?.shopMoney?.amount || "0");
+              const shippingRefunded = parseFloat(edge.node.totalRefundedShippingSet?.shopMoney?.amount || "0");
+              const productRefunded = Math.max(0, totalRefunded - shippingRefunded);
+              const revenue = Math.max(0, subtotal - productRefunded);
               const createdAt = new Date(edge.node.createdAt);
               // Stats totales par pro
               relevantCodes.forEach((code: string) => {
