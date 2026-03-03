@@ -352,12 +352,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         // On crée une map qui contient à la fois la clé brute, et la clé sans accent
         const keys = Object.keys(item).reduce((acc: any, key) => {
           const val = item[key];
-          // Clé 1: minuscules + trim (ex: "prénom nom")
-          acc[key.toLowerCase().trim()] = val;
-          // Clé 2: sans accents (ex: "prenom nom")
+          // Clé 1: minuscules + trim + sans astérisques (ex: "montant*" → "montant")
+          acc[key.toLowerCase().trim().replace(/[*]/g, "")] = val;
+          // Clé 2: sans accents ni astérisques (ex: "prénom*" → "prenom")
           const noAccentKey = key
             .normalize("NFD")
             .replace(/[\u0300-\u036f]/g, "")
+            .replace(/[*]/g, "")
             .toLowerCase()
             .trim();
           acc[noAccentKey] = val;
@@ -922,12 +923,14 @@ function ImportForm({ existingEntries, onClose }: { existingEntries: any[]; onCl
         const val = item[key];
         const cleanKey = key
           .normalize("NFD")
-          .replace(/[\u0300-\u036f]/g, "")
+          .replace(/[\u0300-\u036f]/g, "") // retire accents
+          .replace(/[*]/g, "")             // retire astérisques (ex: "Montant*" → "montant")
           .toLowerCase()
           .trim();
         acc[cleanKey] = val;
         // mapping fallback pour vieux formats
-        acc[key.toLowerCase().trim()] = val;
+        const fallbackKey = key.toLowerCase().trim().replace(/[*]/g, "");
+        acc[fallbackKey] = val;
         return acc;
       }, {});
 
@@ -984,7 +987,8 @@ function ImportForm({ existingEntries, onClose }: { existingEntries: any[]; onCl
       if (!ref) {
         if (!first_name && !last_name && !email && !code) continue;
         const prefix = ((first_name.slice(0, 2) + last_name.slice(0, 2)).toUpperCase() || "XX");
-        ref = `${prefix}${Date.now().toString(36).slice(-4).toUpperCase()}`;
+        const rand = Math.random().toString(36).slice(2, 5).toUpperCase();
+        ref = `${prefix}${Date.now().toString(36).slice(-3).toUpperCase()}${rand}`;
       }
       // Chercher si une entrée existante correspond (par code ou par ref)
       const existingEntry =
