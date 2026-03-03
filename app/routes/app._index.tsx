@@ -1201,14 +1201,13 @@ function RecalculateSingleButton({ entry, onDone }: { entry: any; onDone: () => 
 function RecalculateCacheModal({ entries, onClose }: { entries: any[]; onClose: () => void }) {
   const [phase, setPhase] = useState<"idle" | "fetching" | "updating">("idle");
   const [progress, setProgress] = useState(0);
+  const [total, setTotal] = useState(entries.filter((e) => e.code).length);
   const [errors, setErrors] = useState<string[]>([]);
   const [done, setDone] = useState(false);
   const revalidator = useRevalidator();
   const modalRef = useRef<HTMLDivElement>(null);
   useFocusTrap(modalRef, true, onClose);
 
-  const entriesWithCode = entries.filter((e) => e.code);
-  const total = entriesWithCode.length;
   const isRunning = phase !== "idle";
 
   const runAll = async () => {
@@ -1216,55 +1215,60 @@ function RecalculateCacheModal({ entries, onClose }: { entries: any[]; onClose: 
     setProgress(0);
     setErrors([]);
     setDone(false);
-    const errs: string[] = [];
 
-    // Phase 1 : récupérer toutes les stats en une seule passe (lots de 50 codes)
-    let precomputedStats: Record<string, { revenue: number; count: number }> = {};
     try {
-      const res = await fetch("/app/api/recalculate-stats", { method: "POST" });
-      if (res.ok) {
-        const json = await res.json();
-        if (json.success) precomputedStats = json.stats;
+      const res = await fetch("/app/api/recalculate-all", { method: "POST" });
+      if (!res.ok || !res.body) {
+        setErrors([`Erreur serveur: HTTP ${res.status}`]);
+        setPhase("idle");
+        setDone(true);
+        return;
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done: streamDone, value } = await reader.read();
+        if (streamDone) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          const match = line.match(/^data: (.+)$/m);
+          if (!match) continue;
+          try {
+            const event = JSON.parse(match[1]);
+            if (event.phase === "fetching") setPhase("fetching");
+            if (event.phase === "updating") {
+              setPhase("updating");
+              if (event.total) setTotal(event.total);
+              if (event.progress !== undefined) setProgress(event.progress);
+            }
+            if (event.done) {
+              setProgress(event.total || total);
+              setErrors(event.errors || []);
+              setPhase("idle");
+              setDone(true);
+              indexCache = null;
+              revalidator.revalidate();
+            }
+            if (event.error) {
+              setErrors([event.error]);
+              setPhase("idle");
+              setDone(true);
+            }
+          } catch { /* ignore parse errors */ }
+        }
       }
     } catch (e) {
-      console.warn("[RecalculateModal] Phase 1 échec, fallback sans pré-calcul:", e);
+      setErrors([`Erreur réseau: ${String(e)}`]);
+      setPhase("idle");
+      setDone(true);
     }
-
-    // Phase 2 : mettre à jour chaque pro en parallèle (5 à la fois)
-    setPhase("updating");
-    const CONCURRENCY = 5;
-    for (let i = 0; i < entriesWithCode.length; i += CONCURRENCY) {
-      const chunk = entriesWithCode.slice(i, i + CONCURRENCY);
-      await Promise.all(chunk.map(async (entry: any) => {
-        const fd = new FormData();
-        fd.append("metaobjectId", entry.id);
-        fd.append("code", entry.code);
-        if (entry.customer_id) fd.append("customerId", entry.customer_id);
-        const codeUpper = entry.code.toUpperCase();
-        const preStats = precomputedStats[codeUpper];
-        if (preStats) {
-          fd.append("preRevenue", String(preStats.revenue));
-          fd.append("preCount", String(preStats.count));
-        }
-        try {
-          const res = await fetch("/app/api/recalculate-cache", { method: "POST", body: fd });
-          if (!res.ok) errs.push(`${entry.first_name || ""} ${entry.last_name || ""}: HTTP ${res.status}`);
-          else {
-            const json = await res.json();
-            if (!json.success) errs.push(`${entry.first_name || ""} ${entry.last_name || ""}: ${json.error}`);
-          }
-        } catch (e) {
-          errs.push(`${entry.first_name || ""} ${entry.last_name || ""}: ${String(e)}`);
-        }
-      }));
-      setProgress(Math.min(i + CONCURRENCY, entriesWithCode.length));
-    }
-
-    setErrors(errs);
-    setPhase("idle");
-    setDone(true);
-    indexCache = null;
-    revalidator.revalidate();
   };
 
   return (
