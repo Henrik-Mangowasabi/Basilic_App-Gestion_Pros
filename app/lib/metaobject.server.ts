@@ -390,6 +390,7 @@ export async function createMetaobjectEntry(
     // 3. CRÉATION MÉTAOBJET
     const fieldsInput = [
       { key: "identification", value: String(fields.identification) },
+      { key: "name", value: fullName },
       { key: "first_name", value: firstName },
       { key: "last_name", value: lastName },
       { key: "email", value: String(fields.email) },
@@ -407,55 +408,24 @@ export async function createMetaobjectEntry(
       { key: "cache_ca_remainder", value: "0" },
     ];
 
-    // Diagnostic : récupérer la définition complète pour comprendre "Name can't be blank"
-    try {
-      const defQuery = `query { metaobjectDefinitions(first: 50) { edges { node { type displayNameKey fieldDefinitions { key name type { name } } } } } }`;
-      const defR = await admin.graphql(defQuery);
-      const defD = (await defR.json()) as any;
-      const def = defD.data?.metaobjectDefinitions?.edges?.find((e: any) => e.node?.type === METAOBJECT_TYPE)?.node;
-      if (def) {
-        console.log("[DIAG] Definition:", JSON.stringify({
-          displayNameKey: def.displayNameKey,
-          fields: def.fieldDefinitions.map((f: any) => ({ key: f.key, name: f.name, type: f.type?.name })),
-        }));
-      } else {
-        console.log("[DIAG] Definition NOT FOUND for type:", METAOBJECT_TYPE);
-      }
-    } catch (diagErr) {
-      console.warn("[DIAG] Erreur diagnostic:", diagErr);
-    }
-
-    const handle = String(fields.identification).toLowerCase().replace(/[^a-z0-9]/g, "-").replace(/-+/g, "-").slice(0, 100);
-    console.log("[CREATE] handle:", handle, "identification:", fields.identification);
-
     const mutation = `mutation metaobjectCreate($metaobject: MetaobjectCreateInput!) {
       metaobjectCreate(metaobject: $metaobject) {
-        metaobject { id handle displayName }
-        userErrors { field message code }
+        metaobject { id }
+        userErrors { field message }
       }
     }`;
     const response = await admin.graphql(mutation, {
       variables: {
         metaobject: {
           type: METAOBJECT_TYPE,
-          handle: handle,
           fields: fieldsInput,
-          capabilities: { publishable: { status: "ACTIVE" } },
         },
       },
     });
     const data = (await response.json()) as any;
-    console.log("[CREATE] Shopify raw response:", JSON.stringify({
-      errors: data.errors,
-      metaobject: data.data?.metaobjectCreate?.metaobject,
-      userErrors: data.data?.metaobjectCreate?.userErrors,
-    }));
 
-    if (data.errors?.length > 0) {
-      throw new Error("GraphQL errors: " + JSON.stringify(data.errors));
-    }
     if (data.data?.metaobjectCreate?.userErrors?.length > 0) {
-      console.error("[CREATE] metaobjectCreate userErrors:", JSON.stringify(data.data.metaobjectCreate.userErrors));
+      console.error("[CREATE] userErrors:", JSON.stringify(data.data.metaobjectCreate.userErrors));
       console.error("[CREATE] fieldsInput:", JSON.stringify(fieldsInput));
       throw new Error(data.data.metaobjectCreate.userErrors[0].message);
     }
