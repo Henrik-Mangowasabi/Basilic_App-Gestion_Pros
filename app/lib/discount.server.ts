@@ -67,7 +67,7 @@ export async function createShopifyDiscount(
       // Si le code existe déjà dans Shopify → supprimer l'ancien et recréer via l'app
       // pour obtenir l'attribution "Créé par [app]" dans l'admin Shopify.
       // Utile lors d'un import de masse de pros avec des codes créés manuellement avant l'app.
-      if (errMsg.toLowerCase().includes("taken") || errMsg.toLowerCase().includes("already") || errMsg.toLowerCase().includes("exist")) {
+      if (errMsg.toLowerCase().includes("taken") || errMsg.toLowerCase().includes("already") || errMsg.toLowerCase().includes("exist") || errMsg.toLowerCase().includes("unique")) {
         console.log(`[DISCOUNT] Code "${data.code}" déjà existant → suppression + recréation pour attribution app...`);
         const existingId = await findDiscountIdByCode(admin, data.code);
         if (existingId) {
