@@ -408,22 +408,23 @@ export async function createMetaobjectEntry(
     ];
 
     const mutation = `mutation metaobjectCreate($metaobject: MetaobjectCreateInput!) { metaobjectCreate(metaobject: $metaobject) { metaobject { id } userErrors { field message } } }`;
-    const handle = String(fields.identification || fields.email).toLowerCase().replace(/[^a-z0-9]/g, "_").slice(0, 64);
     const response = await admin.graphql(mutation, {
       variables: {
         metaobject: {
           type: METAOBJECT_TYPE,
-          handle,
           fields: fieldsInput,
         },
       },
     });
     const data = (await response.json()) as any;
+    console.log("[CREATE] Shopify raw response:", JSON.stringify({ errors: data.errors, userErrors: data.data?.metaobjectCreate?.userErrors }));
 
+    if (data.errors?.length > 0) {
+      throw new Error("GraphQL errors: " + JSON.stringify(data.errors));
+    }
     if (data.data?.metaobjectCreate?.userErrors?.length > 0) {
       console.error("[CREATE] metaobjectCreate userErrors:", JSON.stringify(data.data.metaobjectCreate.userErrors));
       console.error("[CREATE] fieldsInput:", JSON.stringify(fieldsInput));
-      console.error("[CREATE] handle:", handle);
       throw new Error(data.data.metaobjectCreate.userErrors[0].message);
     }
 
