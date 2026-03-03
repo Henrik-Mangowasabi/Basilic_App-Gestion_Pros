@@ -2201,11 +2201,11 @@ export default function Index() {
               </div>
             </div>
             {totalPages > 1 && (
-              <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "8px", padding: "12px 0", borderTop: "1px solid #e4e4e7" }}>
-                <button type="button" onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} style={{ padding: "5px 12px", border: "1px solid #e4e4e7", borderRadius: "6px", background: currentPage === 1 ? "#f4f4f5" : "white", cursor: currentPage === 1 ? "not-allowed" : "pointer", color: currentPage === 1 ? "#a1a1aa" : "#18181b", fontSize: "13px", fontWeight: 500 }}>← Précédent</button>
-                <span style={{ fontSize: "13px", color: "#71717a" }}>Page {currentPage} / {totalPages} <span style={{ color: "#a1a1aa" }}>({filteredEntries.length} résultats)</span></span>
-                <button type="button" onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} style={{ padding: "5px 12px", border: "1px solid #e4e4e7", borderRadius: "6px", background: currentPage === totalPages ? "#f4f4f5" : "white", cursor: currentPage === totalPages ? "not-allowed" : "pointer", color: currentPage === totalPages ? "#a1a1aa" : "#18181b", fontSize: "13px", fontWeight: 500 }}>Suivant →</button>
-              </div>
+              <Pagination
+                currentPage={currentPage}
+                totalPages={totalPages}
+                onPageChange={setCurrentPage}
+              />
             )}
           </div>
 

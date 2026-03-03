@@ -430,14 +430,24 @@ export async function createMetaobjectEntry(
       throw new Error(data.data.metaobjectCreate.userErrors[0].message);
     }
 
-    // 4. Mise à jour metafield code_promo sur la fiche client (non-bloquant)
+    // 4. Mise à jour metafields sur la fiche client (non-bloquant)
     if (customerIdToSave) {
       try {
-        await updateCustomerProMetafields(admin, customerIdToSave, {
-          code_promo: String(fields.code),
+        // code_promo + pro_en_attente_de_validation → "validé"
+        const mfMutation = `mutation customerUpdate($input: CustomerInput!) { customerUpdate(input: $input) { userErrors { field message } } }`;
+        await admin.graphql(mfMutation, {
+          variables: {
+            input: {
+              id: customerIdToSave,
+              metafields: [
+                { namespace: "custom", key: "code_promo", value: String(fields.code), type: "single_line_text_field" },
+                { namespace: "custom", key: "pro_en_attente_de_validation", value: "validé", type: "single_line_text_field" },
+              ],
+            },
+          },
         });
       } catch (mfErr) {
-        console.warn("⚠️ [CLIENT] Metafield code_promo non mis à jour (non-bloquant):", mfErr);
+        console.warn("⚠️ [CLIENT] Metafields non mis à jour (non-bloquant):", mfErr);
       }
     }
 
