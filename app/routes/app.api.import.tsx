@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
-import { createMetaobjectEntry, updateMetaobjectEntry } from "../lib/metaobject.server";
+import { createMetaobjectEntry, updateMetaobjectEntry, migrateMetaobjectDefinition } from "../lib/metaobject.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
@@ -33,6 +33,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       headers: { "Content-Type": "application/json" },
     });
   }
+
+  // S'assurer que le displayNameKey de la définition est bien "identification"
+  await migrateMetaobjectDefinition(admin);
 
   const result = await createMetaobjectEntry(admin, {
     identification,
