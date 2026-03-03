@@ -73,30 +73,39 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     const creditBalanceMap = new Map<string, number>();
 
     if (customerIds.length > 0) {
-      try {
-        const response = await admin.graphql(
-          `#graphql
-          query getCustomersData($ids: [ID!]!) {
-            nodes(ids: $ids) {
-              ... on Customer {
-                id
-                tags
-                storeCreditAccounts(first: 1) {
-                  edges {
-                    node {
-                      balance {
-                        amount
-                      }
+      // Shopify nodes() accepte max 250 IDs par requête → on chunk
+      const NODES_CHUNK = 250;
+      const customerChunks: string[][] = [];
+      for (let i = 0; i < customerIds.length; i += NODES_CHUNK) {
+        customerChunks.push(customerIds.slice(i, i + NODES_CHUNK));
+      }
+      const getCustomersDataQuery = `#graphql
+        query getCustomersData($ids: [ID!]!) {
+          nodes(ids: $ids) {
+            ... on Customer {
+              id
+              tags
+              storeCreditAccounts(first: 1) {
+                edges {
+                  node {
+                    balance {
+                      amount
                     }
                   }
                 }
               }
             }
-          }`,
-          { variables: { ids: customerIds } },
+          }
+        }`;
+      try {
+        const chunkResults = await Promise.all(
+          customerChunks.map(async (chunk) => {
+            const response = await admin.graphql(getCustomersDataQuery, { variables: { ids: chunk } });
+            const { data } = await response.json();
+            return data?.nodes || [];
+          }),
         );
-        const { data } = await response.json();
-        const nodes = data?.nodes || [];
+        const nodes = chunkResults.flat();
         nodes.forEach((node: any) => {
           if (node && node.id) {
             tagsMap.set(node.id, node.tags || []);
@@ -1186,7 +1195,7 @@ function RecalculateSingleButton({ entry, onDone }: { entry: any; onDone: () => 
 
 // --- COMPOSANT RECALCUL CACHE ---
 function RecalculateCacheModal({ entries, onClose }: { entries: any[]; onClose: () => void }) {
-  const [isRunning, setIsRunning] = useState(false);
+  const [phase, setPhase] = useState<"idle" | "fetching" | "updating">("idle");
   const [progress, setProgress] = useState(0);
   const [errors, setErrors] = useState<string[]>([]);
   const [done, setDone] = useState(false);
@@ -1196,39 +1205,59 @@ function RecalculateCacheModal({ entries, onClose }: { entries: any[]; onClose: 
 
   const entriesWithCode = entries.filter((e) => e.code);
   const total = entriesWithCode.length;
+  const isRunning = phase !== "idle";
 
   const runAll = async () => {
-    setIsRunning(true);
+    setPhase("fetching");
     setProgress(0);
     setErrors([]);
     setDone(false);
     const errs: string[] = [];
 
-    for (let i = 0; i < entriesWithCode.length; i++) {
-      const entry = entriesWithCode[i];
-      const fd = new FormData();
-      fd.append("metaobjectId", entry.id);
-      fd.append("code", entry.code);
-      if (entry.customer_id) fd.append("customerId", entry.customer_id);
-
-      try {
-        const res = await fetch("/app/api/recalculate-cache", { method: "POST", body: fd });
-        if (!res.ok) { errs.push(`${entry.first_name || ""} ${entry.last_name || ""}: HTTP ${res.status}`); }
-        else {
-          const json = await res.json();
-          if (!json.success) errs.push(`${entry.first_name || ""} ${entry.last_name || ""}: ${json.error}`);
-        }
-      } catch (e) {
-        errs.push(`${entry.first_name || ""} ${entry.last_name || ""}: ${String(e)}`);
+    // Phase 1 : récupérer toutes les stats en une seule passe (lots de 50 codes)
+    let precomputedStats: Record<string, { revenue: number; count: number }> = {};
+    try {
+      const res = await fetch("/app/api/recalculate-stats", { method: "POST" });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success) precomputedStats = json.stats;
       }
+    } catch (e) {
+      console.warn("[RecalculateModal] Phase 1 échec, fallback sans pré-calcul:", e);
+    }
 
-      setProgress(i + 1);
-      // Pause légère entre les requêtes pour ne pas surcharger Shopify
-      if (i < entriesWithCode.length - 1) await new Promise((r) => setTimeout(r, 150));
+    // Phase 2 : mettre à jour chaque pro en parallèle (5 à la fois)
+    setPhase("updating");
+    const CONCURRENCY = 5;
+    for (let i = 0; i < entriesWithCode.length; i += CONCURRENCY) {
+      const chunk = entriesWithCode.slice(i, i + CONCURRENCY);
+      await Promise.all(chunk.map(async (entry: any) => {
+        const fd = new FormData();
+        fd.append("metaobjectId", entry.id);
+        fd.append("code", entry.code);
+        if (entry.customer_id) fd.append("customerId", entry.customer_id);
+        const codeUpper = entry.code.toUpperCase();
+        const preStats = precomputedStats[codeUpper];
+        if (preStats) {
+          fd.append("preRevenue", String(preStats.revenue));
+          fd.append("preCount", String(preStats.count));
+        }
+        try {
+          const res = await fetch("/app/api/recalculate-cache", { method: "POST", body: fd });
+          if (!res.ok) errs.push(`${entry.first_name || ""} ${entry.last_name || ""}: HTTP ${res.status}`);
+          else {
+            const json = await res.json();
+            if (!json.success) errs.push(`${entry.first_name || ""} ${entry.last_name || ""}: ${json.error}`);
+          }
+        } catch (e) {
+          errs.push(`${entry.first_name || ""} ${entry.last_name || ""}: ${String(e)}`);
+        }
+      }));
+      setProgress(Math.min(i + CONCURRENCY, entriesWithCode.length));
     }
 
     setErrors(errs);
-    setIsRunning(false);
+    setPhase("idle");
     setDone(true);
     indexCache = null;
     revalidator.revalidate();
@@ -1242,7 +1271,7 @@ function RecalculateCacheModal({ entries, onClose }: { entries: any[]; onClose: 
           <button type="button" onClick={onClose} disabled={isRunning} className="bsl-modal__close">✕</button>
         </div>
         <div className="bsl-modal__body--import">
-          {!done && !isRunning && (
+          {!done && phase === "idle" && (
             <p style={{ fontSize: "14px", color: "#555", margin: 0 }}>
               Cette opération va recalculer les statistiques de chiffre d&apos;affaires pour <strong>{total} partenaire{total > 1 ? "s" : ""}</strong> en interrogeant l&apos;historique complet des commandes Shopify.
               <br /><br />
@@ -1252,10 +1281,13 @@ function RecalculateCacheModal({ entries, onClose }: { entries: any[]; onClose: 
           {isRunning && (
             <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
               <p style={{ fontSize: "14px", color: "#555", margin: 0 }}>
-                Traitement en cours... <strong>{progress} / {total}</strong>
+                {phase === "fetching"
+                  ? "Préparation des statistiques..."
+                  : <>Traitement en cours... <strong>{progress} / {total}</strong></>
+                }
               </p>
               <div style={{ background: "#e8f5f1", borderRadius: "8px", height: "10px", overflow: "hidden" }}>
-                <div style={{ background: "#008060", height: "100%", width: `${total > 0 ? (progress / total) * 100 : 0}%`, transition: "width 0.3s ease" }} />
+                <div style={{ background: "#008060", height: "100%", width: `${phase === "fetching" ? 5 : (total > 0 ? 5 + (progress / total) * 95 : 100)}%`, transition: "width 0.3s ease" }} />
               </div>
             </div>
           )}
@@ -1287,7 +1319,7 @@ function RecalculateCacheModal({ entries, onClose }: { entries: any[]; onClose: 
               className="bsl-modal__btn bsl-modal__btn--primary"
               style={{ background: isRunning || total === 0 ? "var(--color-gray-300)" : "#008060", cursor: isRunning || total === 0 ? "not-allowed" : "pointer", color: isRunning || total === 0 ? "var(--color-gray-500)" : "white" }}
             >
-              {isRunning ? <><Spinner /> Traitement...</> : "Recalculer le cache"}
+              {isRunning ? <><Spinner /> {phase === "fetching" ? "Préparation..." : "Traitement..."}</> : "Recalculer le cache"}
             </button>
           )}
         </div>

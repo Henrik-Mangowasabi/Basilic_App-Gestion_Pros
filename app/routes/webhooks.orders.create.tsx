@@ -204,7 +204,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           let cursor: string | null = null;
           let totalChecked = 0;
 
-          while (hasNextPage && !metaobjectNode && totalChecked < 1000) { // On limite à 1000 par sécurité
+          while (hasNextPage && !metaobjectNode && totalChecked < 5000) { // Couverture jusqu'à 5 000 pros
             const listQuery = `#graphql
               query listAll($cursor: String) {
                 metaobjects(first: 250, type: "mm_pro_de_sante", after: $cursor) {

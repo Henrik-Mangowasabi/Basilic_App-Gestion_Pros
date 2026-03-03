@@ -347,6 +347,8 @@ export async function createMetaobjectEntry(
     };
   }
   discountIdCreated = discountResult.discountId || null;
+  // Si le discount existait déjà (import de codes créés avant l'app), ne pas le supprimer en cas de rollback
+  const discountWasNewlyCreated = !discountResult.alreadyExisted;
 
   try {
     // 2. GESTION CLIENT (Création ou Tag + Metafields) — non-bloquant
@@ -368,6 +370,13 @@ export async function createMetaobjectEntry(
       }
     } catch (clientErr) {
       console.warn("⚠️ [CLIENT] Sync client exception (non-bloquant):", clientErr);
+    }
+
+    // Fallback : si ensureCustomerPro n'a pas pu résoudre l'ID (Protected Data),
+    // utiliser le customer_id fourni directement (ex: depuis la page validation)
+    if (!customerIdToSave && fields.customer_id) {
+      customerIdToSave = String(fields.customer_id);
+      console.log("[CLIENT] Fallback customer_id depuis fields:", customerIdToSave);
     }
 
     // 3. CRÉATION MÉTAOBJET
@@ -426,8 +435,9 @@ export async function createMetaobjectEntry(
   } catch (error) {
     console.error("❌ ÉCHEC TRANSACTION. Démarrage Rollback...", error);
 
-    // ROLLBACK : Si quoi que ce soit plante après l'étape 1, on supprime le code promo créé.
-    if (discountIdCreated) {
+    // ROLLBACK : Supprimer le code promo uniquement s'il a été créé par cette transaction
+    // (ne pas supprimer un discount préexistant récupéré lors d'un import)
+    if (discountIdCreated && discountWasNewlyCreated) {
       console.log(
         `🗑 Rollback: Suppression du code promo ${discountIdCreated}`,
       );

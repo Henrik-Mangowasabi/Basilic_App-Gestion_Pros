@@ -219,6 +219,10 @@ export default function TutorielPage() {
               <strong>Gestion Chiffre d&apos;affaires</strong> — Suivi du CA généré par chaque pro et gestion des crédits associés.
             </div>
             <div className="tuto-nav-item">
+              <span className="tuto-nav-item__badge tuto-nav-item__badge--new">NEW</span>
+              <strong>Validation des Pros</strong> — Approuvez ou refusez les demandes de partenariat soumises par vos clients.
+            </div>
+            <div className="tuto-nav-item">
               <strong>Tutoriel</strong> — Cette page que vous consultez en ce moment.
             </div>
           </div>
@@ -357,11 +361,11 @@ export default function TutorielPage() {
             </div>
             <div className="tuto-step">
               <div className="tuto-step__num">4</div>
-              <div>Un rapport s&apos;affiche : lignes importées, doublons ignorés, erreurs éventuelles.</div>
+              <div>Un rapport s&apos;affiche : lignes importées, lignes mises à jour, erreurs éventuelles.</div>
             </div>
           </div>
-          <div className="tuto-info-box tuto-info-box--warning">
-            ⚠️ <strong>Doublons :</strong> Si un code promo ou une référence existe déjà, la ligne est ignorée (pas de duplication).
+          <div className="tuto-info-box">
+            💡 <strong>Upsert automatique :</strong> Si un professionnel avec le même code promo ou la même référence existe déjà, ses informations sont <strong>mises à jour</strong> automatiquement. Aucune duplication n&apos;est créée.
           </div>
         </div>
 
@@ -421,6 +425,24 @@ export default function TutorielPage() {
               <div><strong>Crédits restants</strong> — Solde actuel de Store Credit Shopify disponible pour le partenaire.</div>
             </div>
           </div>
+          <h3 className="tuto-subsection">Recalculer le cache CA</h3>
+          <p className="tuto-section__desc">
+            Le cache CA est mis à jour automatiquement à chaque nouvelle commande. Si vous constatez un écart avec les données Analytics
+            (par exemple après une réinstallation ou une période sans webhook), utilisez le bouton <strong>Recalculer</strong> pour resynchroniser.
+          </p>
+          <div className="tuto-feature-list">
+            <div className="tuto-feature">
+              <span className="tuto-feature__icon">🔁</span>
+              <div><strong>Recalculer (individuel)</strong> — Cliquez sur <strong>...</strong> sur la ligne d&apos;un pro, puis <strong>Recalculer le CA</strong>. Resynchronise le CA et le nombre de commandes pour ce seul pro.</div>
+            </div>
+            <div className="tuto-feature">
+              <span className="tuto-feature__icon">⚡</span>
+              <div><strong>Recalculer tout</strong> — Cliquez sur le bouton <strong>Recalculer</strong> en haut de la vue Chiffre d&apos;affaires pour resynchroniser tous les pros en séquence avec une barre de progression.</div>
+            </div>
+          </div>
+          <div className="tuto-info-box tuto-info-box--warning">
+            ⚠️ Le recalcul met à jour uniquement le <strong>CA</strong> et le <strong>nombre de commandes</strong>. Les crédits gagnés et le solde restant ne sont <strong>jamais modifiés</strong> par le recalcul, car l&apos;historique des paliers précédents n&apos;est pas connu.
+          </div>
           <div className="tuto-info-box">
             💡 Utilisez la bascule <strong>Code Promo / Chiffre d&apos;affaires</strong> en haut de la page principale pour naviguer entre les deux vues sans changer de page.
           </div>
@@ -462,7 +484,58 @@ export default function TutorielPage() {
           </div>
         </div>
 
-        {/* ── SECTION 9 : ANALYTIQUE ── */}
+        {/* ── SECTION 9 : VALIDATION PROS ── */}
+        <div className="tuto-section">
+          <h2 className="tuto-section__title">
+            <span className="tuto-section__icon">✅</span>
+            Validation des Pros en attente
+          </h2>
+          <p className="tuto-section__desc">
+            La page <strong>Validation des Pros</strong> liste tous les clients Shopify qui ont demandé à rejoindre votre programme partenaire
+            et sont en attente de votre décision. Un client apparaît ici lorsqu&apos;il possède le tag <code>pro_pending</code> sur sa fiche Shopify.
+          </p>
+
+          <h3 className="tuto-subsection">Comment fonctionne le flux</h3>
+          <div className="tuto-steps">
+            <div className="tuto-step">
+              <div className="tuto-step__num">1</div>
+              <div>Un client remplit un formulaire de candidature sur votre site. Son compte reçoit le tag <strong>pro_pending</strong>.</div>
+            </div>
+            <div className="tuto-step">
+              <div className="tuto-step__num">2</div>
+              <div>Il apparaît automatiquement dans la page <strong>Validation des Pros</strong> avec ses informations (nom, email, profession, adresse).</div>
+            </div>
+            <div className="tuto-step">
+              <div className="tuto-step__num">3</div>
+              <div>Vous pouvez <strong>Valider</strong> ou <strong>Refuser</strong> chaque demande individuellement.</div>
+            </div>
+            <div className="tuto-step">
+              <div className="tuto-step__num">4</div>
+              <div>Vous pouvez aussi sélectionner plusieurs demandes et les traiter en <strong>lot</strong> via les boutons de validation/refus groupés.</div>
+            </div>
+          </div>
+
+          <h3 className="tuto-subsection">Valider un pro</h3>
+          <div className="tuto-feature-list">
+            <div className="tuto-feature">
+              <span className="tuto-feature__icon">✅</span>
+              <div>Cliquez sur <strong>Valider</strong> sur la ligne du candidat. L&apos;application crée automatiquement la fiche pro (métaobjet), génère un code promo selon la configuration par défaut, et retire le tag <em>pro_pending</em>.</div>
+            </div>
+            <div className="tuto-feature">
+              <span className="tuto-feature__icon">❌</span>
+              <div>Cliquez sur <strong>Refuser</strong> pour rejeter la demande. Le tag <em>pro_pending</em> est retiré sans créer de fiche pro ni de code promo.</div>
+            </div>
+          </div>
+
+          <div className="tuto-info-box">
+            💡 <strong>Déverrouillage requis :</strong> Le mode édition doit être actif pour valider ou refuser des demandes.
+          </div>
+          <div className="tuto-info-box tuto-info-box--warning">
+            ⚠️ Les informations du code promo par défaut (valeur, type, préfixe) sont configurées dans <strong>Réglages Crédits</strong>. Assurez-vous de les avoir définies avant de valider vos premiers pros.
+          </div>
+        </div>
+
+        {/* ── SECTION 11 : ANALYTIQUE ── */}
         <div className="tuto-section">
           <h2 className="tuto-section__title">
             <span className="tuto-section__icon">📊</span>
@@ -485,7 +558,7 @@ export default function TutorielPage() {
             </div>
             <div className="tuto-feature">
               <span className="tuto-feature__icon">✅</span>
-              <div><strong>Pros actifs</strong> — Nombre de partenaires ayant généré au moins une commande sur la période.</div>
+              <div><strong>Pros actifs</strong> — Nombre de partenaires dont le statut est <em>actif</em> dans la base (code promo activé), indépendamment de la période sélectionnée.</div>
             </div>
             <div className="tuto-feature">
               <span className="tuto-feature__icon">👥</span>
@@ -495,24 +568,24 @@ export default function TutorielPage() {
 
           <h3 className="tuto-subsection">Filtre par période</h3>
           <p className="tuto-section__desc">
-            En haut de la page, sélectionnez la période d&apos;analyse pour affiner tous les indicateurs et le classement :
+            Définissez librement la période d&apos;analyse à l&apos;aide du sélecteur de dates en haut de la page :
           </p>
           <div className="tuto-feature-list">
             <div className="tuto-feature">
               <span className="tuto-feature__icon">📅</span>
-              <div><strong>Cette semaine</strong> — Commandes et CA des 7 derniers jours.</div>
+              <div><strong>Date de début / Date de fin</strong> — Saisissez ou sélectionnez une plage de dates personnalisée. Tous les KPIs et le classement se mettent à jour automatiquement.</div>
             </div>
             <div className="tuto-feature">
-              <span className="tuto-feature__icon">📅</span>
-              <div><strong>Ce mois</strong> — Commandes et CA du mois en cours.</div>
+              <span className="tuto-feature__icon">📊</span>
+              <div><strong>Graphique 6 mois</strong> — Le graphique à barres affiche le nombre de commandes par mois sur les 6 derniers mois. <strong>Cliquez sur une barre</strong> pour filtrer instantanément sur ce mois complet.</div>
             </div>
             <div className="tuto-feature">
-              <span className="tuto-feature__icon">📅</span>
-              <div><strong>Ce trimestre</strong> — Commandes et CA des 3 derniers mois.</div>
+              <span className="tuto-feature__icon">🗓️</span>
+              <div><strong>Bouton « Ce mois »</strong> — Raccourci pour appliquer le mois en cours en un clic.</div>
             </div>
             <div className="tuto-feature">
-              <span className="tuto-feature__icon">📅</span>
-              <div><strong>Depuis le début</strong> — Toutes les données depuis l&apos;installation de l&apos;application.</div>
+              <span className="tuto-feature__icon">🔄</span>
+              <div><strong>Vue totale</strong> — Cliquez sur <strong>Total</strong> (dans la carte CA) pour effacer les filtres et retrouver les données cumulées depuis le début.</div>
             </div>
           </div>
 
@@ -577,8 +650,23 @@ export default function TutorielPage() {
             <details className="tuto-faq">
               <summary className="tuto-faq__question">Peut-on avoir deux pros avec le même code promo ?</summary>
               <div className="tuto-faq__answer">
-                Non. Chaque code promo doit être unique. Si vous tentez d&apos;importer un code déjà existant,
-                la ligne sera ignorée et signalée comme doublon dans le rapport d&apos;import.
+                Non. Chaque code promo doit être unique. Si vous importez un fichier avec un code déjà existant,
+                les informations du pro existant seront <strong>mises à jour</strong> (upsert) — aucune duplication n&apos;est créée.
+              </div>
+            </details>
+            <details className="tuto-faq">
+              <summary className="tuto-faq__question">Le CA dans Gestion ne correspond pas à Analytics, que faire ?</summary>
+              <div className="tuto-faq__answer">
+                Le CA dans Gestion Chiffre d&apos;affaires est un <strong>cache</strong> mis à jour à chaque commande via webhook (depuis l&apos;installation de l&apos;app).
+                Analytics interroge Shopify en temps réel. Si vous constatez un écart, utilisez le bouton <strong>Recalculer</strong> pour resynchroniser
+                le cache depuis l&apos;historique complet des commandes.
+              </div>
+            </details>
+            <details className="tuto-faq">
+              <summary className="tuto-faq__question">Le recalcul va-t-il recréditer les pros ?</summary>
+              <div className="tuto-faq__answer">
+                Non. Le recalcul met à jour <strong>uniquement le CA et le nombre de commandes</strong>. Les crédits gagnés
+                et le solde restant ne sont jamais modifiés lors d&apos;un recalcul, afin de préserver l&apos;historique des versements déjà effectués.
               </div>
             </details>
             <details className="tuto-faq">
