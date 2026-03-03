@@ -325,7 +325,15 @@ export async function createMetaobjectEntry(
   admin: AdminApiContext,
   fields: any,
 ) {
-  const fullName = `${fields.first_name || ""} ${fields.last_name || ""}`.trim();
+  // Si first_name vide mais last_name contient un nom complet → on split
+  let firstName = (fields.first_name || "").trim();
+  let lastName = (fields.last_name || "").trim();
+  if (!firstName && lastName) {
+    const parts = lastName.split(/\s+/);
+    firstName = parts[0];
+    lastName = parts.slice(1).join(" ");
+  }
+  const fullName = `${firstName} ${lastName}`.trim();
   const discountName = `Code promo Pro Sante - ${fullName}`;
   let discountIdCreated: string | null = null;
   let customerIdToSave: string = "";
@@ -356,8 +364,8 @@ export async function createMetaobjectEntry(
       const clientResult = await ensureCustomerPro(
         admin,
         fields.email,
-        fields.first_name || "",
-        fields.last_name || "",
+        firstName,
+        lastName,
         fields.profession,
         fields.adresse,
       );
@@ -382,8 +390,8 @@ export async function createMetaobjectEntry(
     // 3. CRÉATION MÉTAOBJET
     const fieldsInput = [
       { key: "identification", value: String(fields.identification) },
-      { key: "first_name", value: String(fields.first_name || "") },
-      { key: "last_name", value: String(fields.last_name || "") },
+      { key: "first_name", value: firstName },
+      { key: "last_name", value: lastName },
       { key: "email", value: String(fields.email) },
       { key: "code", value: String(fields.code) },
       { key: "montant", value: String(fields.montant) },
@@ -399,7 +407,7 @@ export async function createMetaobjectEntry(
       { key: "cache_ca_remainder", value: "0" },
     ];
 
-    const mutation = `mutation metaobjectCreate($metaobject: MetaobjectCreateInput!) { metaobjectCreate(metaobject: $metaobject) { metaobject { id }, userErrors { field message } } }`;
+    const mutation = `mutation metaobjectCreate($metaobject: MetaobjectCreateInput!) { metaobjectCreate(metaobject: $metaobject) { metaobject { id } userErrors { field message } } }`;
     const handle = String(fields.identification || fields.email).toLowerCase().replace(/[^a-z0-9]/g, "_").slice(0, 64);
     const response = await admin.graphql(mutation, {
       variables: {
@@ -407,7 +415,6 @@ export async function createMetaobjectEntry(
           type: METAOBJECT_TYPE,
           handle,
           fields: fieldsInput,
-          capabilities: { publishable: { status: "ACTIVE" } },
         },
       },
     });
