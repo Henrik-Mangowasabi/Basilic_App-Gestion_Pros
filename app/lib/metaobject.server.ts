@@ -407,25 +407,37 @@ export async function createMetaobjectEntry(
       { key: "cache_ca_remainder", value: "0" },
     ];
 
-    const mutation = `mutation metaobjectCreate($metaobject: MetaobjectCreateInput!) { metaobjectCreate(metaobject: $metaobject) { metaobject { id } userErrors { field message } } }`;
+    // Utiliser metaobjectUpsert pour contourner le bug "Name can't be blank" de metaobjectCreate
+    const handle = String(fields.identification).toLowerCase().replace(/[^a-z0-9]/g, "-").replace(/-+/g, "-").slice(0, 100);
+    console.log("[CREATE] Utilisation metaobjectUpsert avec handle:", handle);
+
+    const mutation = `mutation metaobjectUpsert($handle: MetaobjectHandleInput!, $metaobject: MetaobjectUpsertInput!) {
+      metaobjectUpsert(handle: $handle, metaobject: $metaobject) {
+        metaobject { id }
+        userErrors { field message }
+      }
+    }`;
     const response = await admin.graphql(mutation, {
       variables: {
-        metaobject: {
+        handle: {
           type: METAOBJECT_TYPE,
+          handle: handle,
+        },
+        metaobject: {
           fields: fieldsInput,
         },
       },
     });
     const data = (await response.json()) as any;
-    console.log("[CREATE] Shopify raw response:", JSON.stringify({ errors: data.errors, userErrors: data.data?.metaobjectCreate?.userErrors }));
+    console.log("[CREATE] Shopify raw response:", JSON.stringify({ errors: data.errors, userErrors: data.data?.metaobjectUpsert?.userErrors }));
 
     if (data.errors?.length > 0) {
       throw new Error("GraphQL errors: " + JSON.stringify(data.errors));
     }
-    if (data.data?.metaobjectCreate?.userErrors?.length > 0) {
-      console.error("[CREATE] metaobjectCreate userErrors:", JSON.stringify(data.data.metaobjectCreate.userErrors));
+    if (data.data?.metaobjectUpsert?.userErrors?.length > 0) {
+      console.error("[CREATE] metaobjectUpsert userErrors:", JSON.stringify(data.data.metaobjectUpsert.userErrors));
       console.error("[CREATE] fieldsInput:", JSON.stringify(fieldsInput));
-      throw new Error(data.data.metaobjectCreate.userErrors[0].message);
+      throw new Error(data.data.metaobjectUpsert.userErrors[0].message);
     }
 
     // 4. Mise à jour metafield code_promo sur la fiche client (non-bloquant)
