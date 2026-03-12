@@ -1,5 +1,5 @@
 // FICHIER : app/components/NavBar.tsx
-import { NavLink, useNavigate, useLocation, useFetcher } from "react-router";
+import { NavLink, useNavigate, useLocation, useFetcher, useRouteLoaderData } from "react-router";
 import { useRef, useEffect, useState } from "react";
 import { useEditMode } from "../context/EditModeContext";
 
@@ -137,25 +137,13 @@ export function NavBar() {
   // Validation defaults
   const [showValidationPanel, setShowValidationPanel] = useState(false);
   const [valDefaults, setValDefaults] = useState(validationDefaults);
-  const [validationCount, setValidationCount] = useState(0);
+  const rootData = useRouteLoaderData("routes/app") as any;
+  const validationCount: number = rootData?.pendingCount ?? 0;
 
   // Sync valDefaults quand le context est mis à jour par le serveur
   useEffect(() => {
     setValDefaults(validationDefaults);
   }, [validationDefaults.value, validationDefaults.type, validationDefaults.codePrefix]);
-
-  useEffect(() => {
-    const updateValidationCount = () => {
-      try {
-        const count = parseInt(localStorage.getItem("validation_pending_count") || "0", 10);
-        setValidationCount(count);
-      } catch {}
-    };
-
-    updateValidationCount();
-    const interval = setInterval(updateValidationCount, 2000);
-    return () => clearInterval(interval);
-  }, []);
 
   const onAnalytiquePage = location.pathname === "/app/analytique";
 

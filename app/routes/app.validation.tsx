@@ -87,7 +87,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       for (const edge of edges) {
         const c = edge.node;
         const metaValue: string = c.proMeta?.value ?? "";
-        if (metaValue.trim() && metaValue !== "refusé") {
+        if (metaValue === "en_attente") {
           const addr = c.defaultAddress;
           const adresseMeta = c.adresseMeta?.value || "";
           customers.push({
@@ -493,9 +493,9 @@ function generatePromoCode(
   prefix: string,
   existingCodes: Set<string>,
 ): string {
-  const lastPart = lastName.slice(0, 2).toUpperCase() || "XX";
-  const firstPart = firstName.slice(0, 2).toUpperCase() || "XX";
-  let baseCode = `${prefix}${lastPart}${firstPart}`;
+  const firstPart = firstName.slice(0, 3).toUpperCase() || "XXX";
+  const lastPart = lastName.slice(0, 3).toUpperCase() || "XXX";
+  let baseCode = `${prefix}${firstPart}${lastPart}`;
 
   let finalCode = baseCode;
   let counter = 1;
@@ -548,6 +548,8 @@ function AcceptModal({
   const [code, setCode] = useState(autoCode);
   const [value, setValue] = useState(defaultSettings.value);
   const [type, setType] = useState(defaultSettings.type);
+
+  const codeConflict = code.trim() !== "" && existingCodes.has(code.trim().toUpperCase());
 
   const handleSubmit = () => {
     setProcessingCustomerId(customer.id);
@@ -632,7 +634,9 @@ function AcceptModal({
                 placeholder="Ex: MEDECIN10"
                 value={code}
                 onChange={(e) => setCode(e.target.value.toUpperCase())}
+                style={codeConflict ? { borderColor: "#e53e3e" } : undefined}
               />
+              {codeConflict && <p style={{ color: "#e53e3e", fontSize: "0.78rem", marginTop: "4px" }}>⚠️ Ce code existe déjà — modifiez-le avant de continuer.</p>}
             </div>
             <div className="bsl-modal__grid2">
               <div>
@@ -667,9 +671,9 @@ function AcceptModal({
           <button
             type="button"
             onClick={handleSubmit}
-            disabled={isLocked}
+            disabled={isLocked || codeConflict}
             className="bsl-modal__btn bsl-modal__btn--primary"
-            style={{ opacity: isLocked ? 0.7 : 1 }}
+            style={{ opacity: isLocked || codeConflict ? 0.7 : 1 }}
           >
             Créer le Partenaire
           </button>
@@ -771,15 +775,6 @@ export default function ValidationPage() {
   useEffect(() => {
     setDefaultSettings(validationDefaults);
   }, [validationDefaults.value, validationDefaults.type, validationDefaults.codePrefix]);
-
-  // Store validation count for navbar badge
-  useEffect(() => {
-    try {
-      localStorage.setItem("validation_pending_count", String(customers.length));
-    } catch (e) {
-      console.error("Error storing validation count:", e);
-    }
-  }, [customers.length]);
 
   // Toast notifications
   useEffect(() => {
