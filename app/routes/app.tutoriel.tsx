@@ -283,6 +283,10 @@ export default function TutorielPage() {
             </div>
             <div className="tuto-step">
               <div className="tuto-step__num">3</div>
+              <div>Le <strong>code promo est généré automatiquement</strong> à partir du prénom et du nom (3 premières lettres de chaque). Ex : Pascal Dupont → <code>PRO_PASDUP</code>. Si le code existe déjà, un suffixe numérique est ajouté automatiquement (<code>PRO_PASDUP1</code>). Vous pouvez modifier le code manuellement — une alerte s&apos;affiche si le code saisi est déjà pris.</div>
+            </div>
+            <div className="tuto-step">
+              <div className="tuto-step__num">4</div>
               <div>Cliquez sur <strong>Créer</strong>. L&apos;app crée automatiquement le code promo dans Shopify et associe le client.</div>
             </div>
           </div>
@@ -296,6 +300,10 @@ export default function TutorielPage() {
             <div className="tuto-step">
               <div className="tuto-step__num">2</div>
               <div>Modifiez les informations souhaitées et cliquez sur <strong>Enregistrer</strong>. Les informations du client Shopify sont automatiquement synchronisées.</div>
+            </div>
+            <div className="tuto-step">
+              <div className="tuto-step__num">ℹ</div>
+              <div><strong>L&apos;adresse email ne peut pas être modifiée</strong> depuis l&apos;app — le champ est verrouillé en mode édition. Pour changer l&apos;email d&apos;un partenaire, effectuez la modification directement sur sa fiche client dans l&apos;administration Shopify.</div>
             </div>
           </div>
 
@@ -424,6 +432,10 @@ export default function TutorielPage() {
               <span className="tuto-feature__icon">✅</span>
               <div><strong>Crédits restants</strong> — Solde actuel de Store Credit Shopify disponible pour le partenaire.</div>
             </div>
+            <div className="tuto-feature">
+              <span className="tuto-feature__icon">🎯</span>
+              <div><strong>Prochain palier</strong> — CA restant à générer pour débloquer le prochain crédit boutique. Ex : 47,50 € → le partenaire doit encore générer 47,50 € de CA pour recevoir son prochain crédit.</div>
+            </div>
           </div>
           <h3 className="tuto-subsection">Recalculer le cache CA</h3>
           <p className="tuto-section__desc">
@@ -492,7 +504,8 @@ export default function TutorielPage() {
           </h2>
           <p className="tuto-section__desc">
             La page <strong>Validation des Pros</strong> liste tous les clients Shopify qui ont demandé à rejoindre votre programme partenaire
-            et sont en attente de votre décision. Un client apparaît ici lorsqu&apos;il possède le tag <code>pro_pending</code> sur sa fiche Shopify.
+            et sont en attente de votre décision. Seuls les candidats dont le statut est <strong>en attente</strong> sont affichés — les demandes déjà validées ou refusées n&apos;apparaissent plus.
+            Le badge numérique sur l&apos;entrée de menu se met à jour <strong>automatiquement au chargement de l&apos;application</strong>.
           </p>
 
           <h3 className="tuto-subsection">Comment fonctionne le flux</h3>
@@ -674,6 +687,21 @@ export default function TutorielPage() {
               <div className="tuto-faq__answer">
                 Les réglages crédits ne modifient pas les crédits déjà attribués. Seules les prochaines commandes
                 seront calculées avec les nouveaux paramètres.
+              </div>
+            </details>
+            <details className="tuto-faq">
+              <summary className="tuto-faq__question">Le lien vers un code promo mène à une page d&apos;erreur dans Shopify, que faire ?</summary>
+              <div className="tuto-faq__answer">
+                Cela arrive si le discount Shopify a été supprimé et recréé manuellement hors de l&apos;app (l&apos;identifiant stocké est alors périmé).
+                Pour corriger : ouvrez la fiche du pro concerné, cliquez sur <strong>Modifier</strong> puis <strong>Enregistrer</strong> sans rien changer.
+                L&apos;app détecte automatiquement que le discount est introuvable, le recrée et met à jour le lien.
+              </div>
+            </details>
+            <details className="tuto-faq">
+              <summary className="tuto-faq__question">Peut-on modifier l&apos;email d&apos;un partenaire depuis l&apos;app ?</summary>
+              <div className="tuto-faq__answer">
+                Non. L&apos;email est verrouillé en mode édition car Shopify ne permet pas de modifier l&apos;adresse email d&apos;un compte client via l&apos;API.
+                Pour changer l&apos;email, rendez-vous directement sur la fiche du client dans l&apos;administration Shopify.
               </div>
             </details>
           </div>

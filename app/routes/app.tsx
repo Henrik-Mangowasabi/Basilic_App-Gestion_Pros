@@ -1,4 +1,4 @@
-import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
+import type { HeadersFunction, LoaderFunctionArgs, ShouldRevalidateFunctionArgs } from "react-router";
 import { Outlet, useLoaderData, useRouteError, useNavigation } from "react-router";
 import { useState, useEffect } from "react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
@@ -11,12 +11,26 @@ import { NavBar } from "../components/NavBar";
 import { EditModeProvider, useEditMode } from "../context/EditModeContext";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await authenticate.admin(request);
+  const { admin } = await authenticate.admin(request);
+
+  let pendingCount = 0;
+  try {
+    const r = await admin.graphql(`query {
+      customers(first: 250, query: "tag:pro_pending") {
+        edges { node { proMeta: metafield(namespace: "custom", key: "pro_en_attente_de_validation") { value } } }
+      }
+    }`);
+    const d = await r.json() as any;
+    pendingCount = (d.data?.customers?.edges || []).filter(
+      (e: any) => e.node.proMeta?.value === "en_attente"
+    ).length;
+  } catch {}
 
   // eslint-disable-next-line no-undef
   return {
     apiKey: process.env.SHOPIFY_API_KEY || "",
     adminPassword: process.env.ADMIN_PASSWORD || "GestionPro",
+    pendingCount,
   };
 };
 
@@ -117,6 +131,9 @@ export function ErrorBoundary() {
     </ShopifyAppProvider>
   );
 }
+
+// Ne re-exécute le loader root qu'au premier chargement, pas à chaque navigation
+export const shouldRevalidate = (_: ShouldRevalidateFunctionArgs) => false;
 
 export const headers: HeadersFunction = (headersArgs) => {
   return boundary.headers(headersArgs);

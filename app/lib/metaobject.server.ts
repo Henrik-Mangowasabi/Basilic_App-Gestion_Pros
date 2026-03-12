@@ -510,20 +510,38 @@ export async function updateMetaobjectEntry(
   const mergedType = fields.type || oldData.type;
 
   // 2. Mise à jour du Code Promo
+  let newDiscountId: string | null = null;
   if (oldData.discount_id) {
     if (fields.first_name !== undefined || fields.last_name !== undefined || fields.code || fields.montant || fields.type) {
       const discountName = `Code promo Pro Sante - ${mergedFullName}`;
-      await updateShopifyDiscount(admin, oldData.discount_id, {
+      const updateResult = await updateShopifyDiscount(admin, oldData.discount_id, {
         code: mergedCode,
         montant: mergedMontant,
         type: mergedType,
         name: discountName,
       });
+      if (!updateResult.success) {
+        // Discount introuvable (supprimé manuellement côté Shopify) → recréer
+        console.log(`[UPDATE] Discount introuvable (${updateResult.error}) → recréation du discount...`);
+        const createResult = await createShopifyDiscount(admin, {
+          code: mergedCode,
+          montant: mergedMontant,
+          type: mergedType,
+          name: discountName,
+        });
+        if (createResult.success && createResult.discountId) {
+          newDiscountId = createResult.discountId;
+          console.log(`[UPDATE] Discount recréé avec ID ${newDiscountId} ✅`);
+        } else {
+          console.warn(`[UPDATE] Recréation discount échouée: ${createResult.error}`);
+        }
+      }
     }
 
+    const activeDiscountId = newDiscountId || oldData.discount_id;
     if (fields.status !== undefined) {
       const isActive = fields.status === true || fields.status === "true";
-      await toggleShopifyDiscount(admin, oldData.discount_id, isActive);
+      await toggleShopifyDiscount(admin, activeDiscountId, isActive);
     }
   }
 
@@ -609,6 +627,8 @@ export async function updateMetaobjectEntry(
     fieldsInput.push({ key: "profession", value: String(fields.profession) });
   if (fields.adresse !== undefined)
     fieldsInput.push({ key: "adresse", value: String(fields.adresse) });
+  if (newDiscountId)
+    fieldsInput.push({ key: "discount_id", value: newDiscountId });
 
   const mutation = `mutation metaobjectUpdate($id: ID!, $metaobject: MetaobjectUpdateInput!) { metaobjectUpdate(id: $id, metaobject: $metaobject) { userErrors { field message } } }`;
 

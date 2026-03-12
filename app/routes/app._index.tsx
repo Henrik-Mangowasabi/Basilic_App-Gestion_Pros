@@ -1343,9 +1343,9 @@ function generatePromoCode(
   prefix: string,
   existingCodes: Set<string>,
 ): string {
-  const lastPart = lastName.slice(0, 2).toUpperCase() || "XX";
-  const firstPart = firstName.slice(0, 2).toUpperCase() || "XX";
-  let baseCode = `${prefix}${lastPart}${firstPart}`;
+  const firstPart = firstName.slice(0, 3).toUpperCase() || "XXX";
+  const lastPart = lastName.slice(0, 3).toUpperCase() || "XXX";
+  let baseCode = `${prefix}${firstPart}${lastPart}`;
 
   let finalCode = baseCode;
   let counter = 1;
@@ -1403,6 +1403,9 @@ function PartnerModal({ mode, entry, onClose, entries }: { mode: "create" | "edi
   const [fd, setFd] = useState(getInitialFormData());
   const [hasManuallyEditedCode, setHasManuallyEditedCode] = useState(false);
 
+  const existingCodesSet = useMemo(() => new Set((entries || []).map((e: any) => (e.code || "").toUpperCase())), [entries]);
+  const codeConflict = fd.code.trim() !== "" && existingCodesSet.has(fd.code.trim().toUpperCase()) && (!isEdit || fd.code.trim().toUpperCase() !== (entry?.code || "").toUpperCase());
+
   const isBusy = isEdit
     ? nav.formData?.get("action") === "update_entry" && nav.formData?.get("id") === entry?.id
     : nav.formData?.get("action") === "create_entry";
@@ -1427,7 +1430,7 @@ function PartnerModal({ mode, entry, onClose, entries }: { mode: "create" | "edi
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") { onClose(); return; }
-      if (e.key === "Enter" && !isBusy) {
+      if (e.key === "Enter" && !isBusy && !codeConflict) {
         const tag = (document.activeElement as HTMLElement)?.tagName?.toUpperCase();
         if (tag !== "SELECT" && tag !== "TEXTAREA" && tag !== "BUTTON") {
           if (isEdit) {
@@ -1471,8 +1474,9 @@ function PartnerModal({ mode, entry, onClose, entries }: { mode: "create" | "edi
             </div>
           </div>
           <div>
-            <label className="bsl-modal__label">Email *</label>
-            <input className="bsl-modal__input" type="email" placeholder="email@exemple.com" value={fd.email} onChange={(e) => setFd({ ...fd, email: e.target.value })} disabled={isBusy} />
+            <label className="bsl-modal__label">Email {isEdit ? "" : "*"}</label>
+            <input className="bsl-modal__input" type="email" placeholder="email@exemple.com" value={fd.email} onChange={(e) => setFd({ ...fd, email: e.target.value })} disabled={isBusy || isEdit} style={isEdit ? { opacity: 0.6, cursor: "not-allowed" } : undefined} title={isEdit ? "L'email ne peut pas être modifié depuis l'app" : undefined} />
+            {isEdit && <p style={{ color: "#718096", fontSize: "0.78rem", marginTop: "4px" }}>L&apos;email est géré directement dans Shopify.</p>}
           </div>
           <div>
             <label className="bsl-modal__label">Adresse</label>
@@ -1485,7 +1489,8 @@ function PartnerModal({ mode, entry, onClose, entries }: { mode: "create" | "edi
           <div className="bsl-modal__promo-section">
             <div>
               <label className="bsl-modal__label">Code Promo *</label>
-              <input className="bsl-modal__input bsl-modal__input--code" placeholder="Ex: MEDECIN10" value={fd.code} onChange={(e) => { setFd({ ...fd, code: e.target.value.toUpperCase() }); setHasManuallyEditedCode(true); }} disabled={isBusy} />
+              <input className="bsl-modal__input bsl-modal__input--code" placeholder="Ex: MEDECIN10" value={fd.code} onChange={(e) => { setFd({ ...fd, code: e.target.value.toUpperCase() }); setHasManuallyEditedCode(true); }} disabled={isBusy} style={codeConflict ? { borderColor: "#e53e3e" } : undefined} />
+              {codeConflict && <p style={{ color: "#e53e3e", fontSize: "0.78rem", marginTop: "4px" }}>⚠️ Ce code existe déjà — modifiez-le avant de continuer.</p>}
             </div>
             <div className="bsl-modal__grid2">
               <div>
@@ -1506,7 +1511,7 @@ function PartnerModal({ mode, entry, onClose, entries }: { mode: "create" | "edi
           <button type="button" onClick={onClose} className="bsl-modal__btn bsl-modal__btn--cancel">
             Annuler
           </button>
-          <button type="button" onClick={handleSubmit} disabled={isBusy} className="bsl-modal__btn bsl-modal__btn--primary" style={{ opacity: isBusy ? 0.7 : 1 }}>
+          <button type="button" onClick={handleSubmit} disabled={isBusy || codeConflict} className="bsl-modal__btn bsl-modal__btn--primary" style={{ opacity: isBusy || codeConflict ? 0.7 : 1 }}>
             {isBusy ? "En cours..." : isEdit ? "Sauvegarder" : "Créer le Partenaire"}
           </button>
         </div>
@@ -2016,7 +2021,7 @@ export default function Index() {
                   <col />
                   {!(showCodeBlock || showCABlock) && <col style={{ width: "60px" }} />}
                   {showCodeBlock && <><col style={{ width: "110px" }} /><col style={{ width: "110px" }} /><col style={{ width: "110px" }} /><col style={{ width: "110px" }} /><col style={{ width: "110px" }} /></>}
-                  {showCABlock && <><col style={{ width: "110px" }} /><col style={{ width: "110px" }} /><col style={{ width: "110px" }} /><col style={{ width: "110px" }} /><col style={{ width: "110px" }} /></>}
+                  {showCABlock && <><col style={{ width: "110px" }} /><col style={{ width: "110px" }} /><col style={{ width: "110px" }} /><col style={{ width: "110px" }} /><col style={{ width: "110px" }} /><col style={{ width: "120px" }} /></>}
                   <col style={{ width: "52px" }} />
                 </colgroup>
                 <thead className="ui-table__thead">
@@ -2057,6 +2062,7 @@ export default function Index() {
                       <th className="ui-table__th mf-th--dev mf-th--dev--blue ui-table__th--center">Gagné</th>
                       <th className="ui-table__th mf-th--dev mf-th--dev--blue ui-table__th--center">Utilisé</th>
                       <th className="ui-table__th mf-th--dev mf-th--dev--blue ui-table__th--center">Restant</th>
+                      <th className="ui-table__th mf-th--dev mf-th--dev--blue ui-table__th--center">Prochain palier</th>
                     </>)}
                     <th className="ui-table__th ui-table__th--actions" />
                   </tr>
@@ -2064,7 +2070,7 @@ export default function Index() {
                 <tbody className="ui-table__tbody">
                   {(() => {
                     if (sortedEntries.length === 0) return (
-                      <tr><td colSpan={4 + (!(showCodeBlock || showCABlock) ? 3 : 0) + (showCodeBlock ? 5 : 0) + (showCABlock ? 5 : 0)} className="ui-table__td ui-table__td--empty">Aucun partenaire trouvé</td></tr>
+                      <tr><td colSpan={4 + (!(showCodeBlock || showCABlock) ? 3 : 0) + (showCodeBlock ? 5 : 0) + (showCABlock ? 6 : 0)} className="ui-table__td ui-table__td--empty">Aucun partenaire trouvé</td></tr>
                     );
                     return paginatedEntries.map((entry) => {
                       const isSelected = selectedIds.has(entry.id);
@@ -2188,6 +2194,11 @@ export default function Index() {
                             <td className="ui-table__td mf-cell--devmode mf-cell--devmode--blue">
                               <div className="mf-cell mf-cell--center">
                                 <span className="mf-text--title">{((entry as { credit_balance?: number }).credit_balance || 0).toFixed(2)}€</span>
+                              </div>
+                            </td>
+                            <td className="ui-table__td mf-cell--devmode mf-cell--devmode--blue">
+                              <div className="mf-cell mf-cell--center">
+                                <span className="mf-text--title">{parseFloat((entry as { cache_ca_remainder?: string }).cache_ca_remainder || "0").toFixed(2)}€</span>
                               </div>
                             </td>
                           </>)}
