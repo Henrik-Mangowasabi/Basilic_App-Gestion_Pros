@@ -10,7 +10,7 @@ export function shouldRevalidate({ formAction, defaultShouldRevalidate }: Should
 import { authenticate } from "../shopify.server";
 import { checkMetaobjectStatus, destroyMetaobjectStructure } from "../lib/metaobject.server";
 import { useEditMode } from "../context/EditModeContext";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
@@ -123,10 +123,146 @@ function DangerModal({ onClose, isLocked }: { onClose: () => void; isLocked: boo
   );
 }
 
+function RenommerDiscountsModal({ onClose }: { onClose: () => void }) {
+  const [phase, setPhase] = useState<"idle" | "fetching" | "updating">("idle");
+  const [progress, setProgress] = useState(0);
+  const [total, setTotal] = useState(0);
+  const [errors, setErrors] = useState<string[]>([]);
+  const [done, setDone] = useState(false);
+  const modalRef = useRef<HTMLDivElement>(null);
+  const isRunning = phase !== "idle";
+
+  const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    if (e.key === "Escape" && !isRunning) onClose();
+  }, [isRunning, onClose]);
+
+  useEffect(() => {
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [handleKeyDown]);
+
+  const runRename = async () => {
+    setPhase("fetching");
+    setProgress(0);
+    setErrors([]);
+    setDone(false);
+
+    try {
+      const res = await fetch("/app/api/rename-discounts", { method: "POST" });
+      if (!res.ok || !res.body) {
+        setErrors([`Erreur serveur: HTTP ${res.status}`]);
+        setPhase("idle");
+        setDone(true);
+        return;
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done: streamDone, value } = await reader.read();
+        if (streamDone) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          const match = line.match(/^data: (.+)$/m);
+          if (!match) continue;
+          try {
+            const event = JSON.parse(match[1]);
+            if (event.phase === "fetching") setPhase("fetching");
+            if (event.phase === "updating") {
+              setPhase("updating");
+              if (event.total) setTotal(event.total);
+              if (event.progress !== undefined) setProgress(event.progress);
+            }
+            if (event.done) {
+              setProgress(event.total || total);
+              setErrors(event.errors || []);
+              setPhase("idle");
+              setDone(true);
+            }
+            if (event.error) {
+              setErrors([event.error]);
+              setPhase("idle");
+              setDone(true);
+            }
+          } catch { /* ignore */ }
+        }
+      }
+    } catch (e) {
+      setErrors([`Erreur réseau: ${String(e)}`]);
+      setPhase("idle");
+      setDone(true);
+    }
+  };
+
+  return (
+    <div role="presentation" className="bsl-modal" onClick={(e) => { if (e.target === e.currentTarget && !isRunning) onClose(); }}>
+      <div ref={modalRef} role="dialog" aria-modal="true" aria-label="Renommer les réductions" className="bsl-modal__dialog bsl-modal__dialog--md">
+        <div className="bsl-modal__header">
+          <h2 className="bsl-modal__title">Renommer les réductions Shopify</h2>
+          <button type="button" onClick={onClose} disabled={isRunning} className="bsl-modal__close">✕</button>
+        </div>
+        <div className="bsl-modal__body--import">
+          {!done && phase === "idle" && (
+            <p style={{ fontSize: "14px", color: "#555", margin: 0 }}>
+              Met à jour le titre de toutes les réductions Shopify au nouveau format :<br />
+              <strong>"Code promo Pro Sante - Prénom Nom - CODE"</strong>
+              <br /><br />
+              Cela permet de retrouver facilement une réduction par code dans l&apos;admin Shopify.
+            </p>
+          )}
+          {isRunning && (
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              <p style={{ fontSize: "14px", color: "#555", margin: 0 }}>
+                {phase === "fetching"
+                  ? "Récupération des pros..."
+                  : <>Renommage en cours... <strong>{progress} / {total}</strong></>
+                }
+              </p>
+              <div style={{ background: "#e8f5f1", borderRadius: "8px", height: "10px", overflow: "hidden" }}>
+                <div style={{ background: "#008060", height: "100%", width: `${phase === "fetching" ? 5 : (total > 0 ? 5 + (progress / total) * 95 : 100)}%`, transition: "width 0.3s ease" }} />
+              </div>
+            </div>
+          )}
+          {done && (
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+              <p style={{ fontSize: "14px", color: "#008060", margin: 0, fontWeight: 600 }}>
+                ✅ Terminé — {progress} réduction{progress > 1 ? "s" : ""} renommée{progress > 1 ? "s" : ""}.
+              </p>
+              {errors.length > 0 && (
+                <div style={{ fontSize: "13px", color: "#c0392b", background: "#fff5f5", border: "1px solid #f5c6cb", borderRadius: "6px", padding: "10px", maxHeight: "120px", overflowY: "auto" }}>
+                  <strong>{errors.length} erreur{errors.length > 1 ? "s" : ""} :</strong>
+                  <ul style={{ margin: "6px 0 0", paddingLeft: "18px" }}>
+                    {errors.map((err, i) => <li key={i}>{err}</li>)}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+        <div className="bsl-modal__footer">
+          <button type="button" onClick={onClose} disabled={isRunning} className="btn btn--secondary">Fermer</button>
+          {!done && (
+            <button type="button" onClick={runRename} disabled={isRunning} className="btn btn--primary">
+              {isRunning ? "En cours..." : "Renommer tout"}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function TutorielPage() {
   const { isInitialized } = useLoaderData<typeof loader>();
   const { isLocked } = useEditMode();
   const [showDangerModal, setShowDangerModal] = useState(false);
+  const [showRenameModal, setShowRenameModal] = useState(false);
 
   return (
     <div className="page-wrapper">
@@ -137,6 +273,13 @@ export default function TutorielPage() {
         <div className="page-header__actions">
           <button
             type="button"
+            className="btn btn--secondary"
+            onClick={() => setShowRenameModal(true)}
+          >
+            ✏️ Renommer les réductions
+          </button>
+          <button
+            type="button"
             className="tuto-danger-zone-btn"
             onClick={() => setShowDangerModal(true)}
           >
@@ -144,6 +287,11 @@ export default function TutorielPage() {
           </button>
         </div>
       </div>
+
+      {/* MODAL RENOMMER */}
+      {showRenameModal && (
+        <RenommerDiscountsModal onClose={() => setShowRenameModal(false)} />
+      )}
 
       {/* MODAL DANGER */}
       {showDangerModal && (
@@ -434,8 +582,22 @@ export default function TutorielPage() {
             </div>
             <div className="tuto-feature">
               <span className="tuto-feature__icon">🎯</span>
-              <div><strong>Prochain palier</strong> — CA restant à générer pour débloquer le prochain crédit boutique. Ex : 47,50 € → le partenaire doit encore générer 47,50 € de CA pour recevoir son prochain crédit.</div>
+              <div><strong>Prochain palier</strong> — CA restant à générer pour débloquer le prochain crédit boutique. Ex : 371,74 € → le partenaire doit encore générer 371,74 € de CA pour recevoir son prochain crédit. Cette colonne est <strong>triable</strong> (clic sur l&apos;en-tête). Le calcul s&apos;adapte automatiquement si vous modifiez le seuil de crédits.</div>
             </div>
+          </div>
+          <h3 className="tuto-subsection">Renommer les réductions Shopify</h3>
+          <p className="tuto-section__desc">
+            Le titre des réductions Shopify suit désormais le format <strong>&quot;Code promo Pro Sante - Prénom Nom - CODE&quot;</strong>,
+            ce qui permet de retrouver facilement une réduction par code dans l&apos;admin Shopify (onglet Réductions).
+          </p>
+          <div className="tuto-feature-list">
+            <div className="tuto-feature">
+              <span className="tuto-feature__icon">✏️</span>
+              <div><strong>Renommer en masse</strong> — Cliquez sur le bouton <strong>Renommer les réductions</strong> en haut de cette page pour mettre à jour le titre de toutes les réductions existantes au nouveau format. Une barre de progression affiche l&apos;avancement.</div>
+            </div>
+          </div>
+          <div className="tuto-info-box">
+            💡 Les nouvelles réductions créées ou modifiées via l&apos;application utilisent automatiquement ce format — le renommage en masse est uniquement nécessaire pour les réductions créées avant cette mise à jour.
           </div>
           <h3 className="tuto-subsection">Recalculer le cache CA</h3>
           <p className="tuto-section__desc">
@@ -540,6 +702,16 @@ export default function TutorielPage() {
             </div>
           </div>
 
+          <h3 className="tuto-subsection">Email de bienvenue automatique (Klaviyo)</h3>
+          <div className="tuto-feature-list">
+            <div className="tuto-feature">
+              <span className="tuto-feature__icon">📧</span>
+              <div>Lorsqu&apos;un pro est <strong>accepté</strong> (individuellement ou en lot), un événement <em>Pro Accepté Programme Partenaire</em> est automatiquement envoyé à Klaviyo. Le Flow Klaviyo <strong>&quot;Flux - App Pro sante - Email de validation&quot;</strong> se déclenche alors et envoie un email de bienvenue au pro avec son code promo personnel.</div>
+            </div>
+          </div>
+          <div className="tuto-info-box">
+            💡 Ce Flow est configuré côté Klaviyo. Pour le modifier (contenu, objet, design), rendez-vous dans Klaviyo → Flux → <strong>Flux - App Pro sante - Email de validation</strong>.
+          </div>
           <div className="tuto-info-box">
             💡 <strong>Déverrouillage requis :</strong> Le mode édition doit être actif pour valider ou refuser des demandes.
           </div>

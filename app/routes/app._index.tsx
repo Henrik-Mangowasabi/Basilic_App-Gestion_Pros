@@ -1646,7 +1646,7 @@ export default function Index() {
   }, [serverValDefaults?.value, serverValDefaults?.type, serverValDefaults?.codePrefix]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSort = (key: string) => {
-    const labels: Record<string, string> = { name: "Nom", profession: "Profession", status: "État", orders: "Commandes", revenue: "CA généré" };
+    const labels: Record<string, string> = { name: "Nom", profession: "Profession", status: "État", orders: "Commandes", revenue: "CA généré", prochain_palier: "Prochain palier" };
     setSortConfig(prev => {
       if (prev?.key === key) {
         if (prev.dir === "asc") {
@@ -1693,6 +1693,12 @@ export default function Index() {
         const ra = parseFloat((a as any).cache_revenue || "0"); // eslint-disable-line @typescript-eslint/no-explicit-any
         const rb = parseFloat((b as any).cache_revenue || "0"); // eslint-disable-line @typescript-eslint/no-explicit-any
         return dir * (ra - rb);
+      }
+      case "prochain_palier": {
+        const threshold = serverConfig?.threshold ?? 500;
+        const ra2 = Math.max(0, threshold - parseFloat((a as any).cache_ca_remainder || "0")); // eslint-disable-line @typescript-eslint/no-explicit-any
+        const rb2 = Math.max(0, threshold - parseFloat((b as any).cache_ca_remainder || "0")); // eslint-disable-line @typescript-eslint/no-explicit-any
+        return dir * (ra2 - rb2);
       }
       default: return 0;
     }
@@ -2062,7 +2068,10 @@ export default function Index() {
                       <th className="ui-table__th mf-th--dev mf-th--dev--blue ui-table__th--center">Gagné</th>
                       <th className="ui-table__th mf-th--dev mf-th--dev--blue ui-table__th--center">Utilisé</th>
                       <th className="ui-table__th mf-th--dev mf-th--dev--blue ui-table__th--center">Restant</th>
-                      <th className="ui-table__th mf-th--dev mf-th--dev--blue ui-table__th--center">Prochain palier</th>
+                      <th className="ui-table__th mf-th--dev mf-th--dev--blue ui-table__th--center ui-table__th--sortable" onClick={() => handleSort("prochain_palier")}>
+                        Prochain palier
+                        <SortIcon active={sortConfig?.key === "prochain_palier"} dir={sortConfig?.key === "prochain_palier" ? sortConfig.dir : null} />
+                      </th>
                     </>)}
                     <th className="ui-table__th ui-table__th--actions" />
                   </tr>
@@ -2198,7 +2207,7 @@ export default function Index() {
                             </td>
                             <td className="ui-table__td mf-cell--devmode mf-cell--devmode--blue">
                               <div className="mf-cell mf-cell--center">
-                                <span className="mf-text--title">{parseFloat((entry as { cache_ca_remainder?: string }).cache_ca_remainder || "0").toFixed(2)}€</span>
+                                <span className="mf-text--title">{Math.max(0, (serverConfig?.threshold ?? 500) - parseFloat((entry as { cache_ca_remainder?: string }).cache_ca_remainder || "0")).toFixed(2)}€</span>
                               </div>
                             </td>
                           </>)}

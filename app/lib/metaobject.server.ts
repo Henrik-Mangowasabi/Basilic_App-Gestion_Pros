@@ -334,7 +334,7 @@ export async function createMetaobjectEntry(
     lastName = parts.slice(1).join(" ");
   }
   const fullName = `${firstName} ${lastName}`.trim();
-  const discountName = `Code promo Pro Sante - ${fullName}`;
+  const discountName = `Code promo Pro Sante - ${fullName} - ${fields.code}`;
   let discountIdCreated: string | null = null;
   let customerIdToSave: string = "";
 
@@ -513,7 +513,7 @@ export async function updateMetaobjectEntry(
   let newDiscountId: string | null = null;
   if (oldData.discount_id) {
     if (fields.first_name !== undefined || fields.last_name !== undefined || fields.code || fields.montant || fields.type) {
-      const discountName = `Code promo Pro Sante - ${mergedFullName}`;
+      const discountName = `Code promo Pro Sante - ${mergedFullName} - ${mergedCode}`;
       const updateResult = await updateShopifyDiscount(admin, oldData.discount_id, {
         code: mergedCode,
         montant: mergedMontant,
