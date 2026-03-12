@@ -582,8 +582,22 @@ export default function TutorielPage() {
             </div>
             <div className="tuto-feature">
               <span className="tuto-feature__icon">🎯</span>
-              <div><strong>Prochain palier</strong> — CA restant à générer pour débloquer le prochain crédit boutique. Ex : 47,50 € → le partenaire doit encore générer 47,50 € de CA pour recevoir son prochain crédit.</div>
+              <div><strong>Prochain palier</strong> — CA restant à générer pour débloquer le prochain crédit boutique. Ex : 371,74 € → le partenaire doit encore générer 371,74 € de CA pour recevoir son prochain crédit. Cette colonne est <strong>triable</strong> (clic sur l&apos;en-tête). Le calcul s&apos;adapte automatiquement si vous modifiez le seuil de crédits.</div>
             </div>
+          </div>
+          <h3 className="tuto-subsection">Renommer les réductions Shopify</h3>
+          <p className="tuto-section__desc">
+            Le titre des réductions Shopify suit désormais le format <strong>&quot;Code promo Pro Sante - Prénom Nom - CODE&quot;</strong>,
+            ce qui permet de retrouver facilement une réduction par code dans l&apos;admin Shopify (onglet Réductions).
+          </p>
+          <div className="tuto-feature-list">
+            <div className="tuto-feature">
+              <span className="tuto-feature__icon">✏️</span>
+              <div><strong>Renommer en masse</strong> — Cliquez sur le bouton <strong>Renommer les réductions</strong> en haut de cette page pour mettre à jour le titre de toutes les réductions existantes au nouveau format. Une barre de progression affiche l&apos;avancement.</div>
+            </div>
+          </div>
+          <div className="tuto-info-box">
+            💡 Les nouvelles réductions créées ou modifiées via l&apos;application utilisent automatiquement ce format — le renommage en masse est uniquement nécessaire pour les réductions créées avant cette mise à jour.
           </div>
           <h3 className="tuto-subsection">Recalculer le cache CA</h3>
           <p className="tuto-section__desc">
@@ -688,6 +702,16 @@ export default function TutorielPage() {
             </div>
           </div>
 
+          <h3 className="tuto-subsection">Email de bienvenue automatique (Klaviyo)</h3>
+          <div className="tuto-feature-list">
+            <div className="tuto-feature">
+              <span className="tuto-feature__icon">📧</span>
+              <div>Lorsqu&apos;un pro est <strong>accepté</strong> (individuellement ou en lot), un événement <em>Pro Accepté Programme Partenaire</em> est automatiquement envoyé à Klaviyo. Le Flow Klaviyo <strong>&quot;Flux - App Pro sante - Email de validation&quot;</strong> se déclenche alors et envoie un email de bienvenue au pro avec son code promo personnel.</div>
+            </div>
+          </div>
+          <div className="tuto-info-box">
+            💡 Ce Flow est configuré côté Klaviyo. Pour le modifier (contenu, objet, design), rendez-vous dans Klaviyo → Flux → <strong>Flux - App Pro sante - Email de validation</strong>.
+          </div>
           <div className="tuto-info-box">
             💡 <strong>Déverrouillage requis :</strong> Le mode édition doit être actif pour valider ou refuser des demandes.
           </div>
