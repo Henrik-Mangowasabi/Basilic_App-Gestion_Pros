@@ -7,6 +7,35 @@ import { createMetaobjectEntry, getMetaobjectEntries, migrateMetaobjectDefinitio
 import { updateCustomerInShopify } from "../lib/customer.server";
 import { useEditMode } from "../context/EditModeContext";
 
+// ─── KLAVIYO ───
+async function sendKlaviyoProAccepted(email: string, firstName: string, lastName: string, code: string) {
+  // eslint-disable-next-line no-undef
+  const apiKey = process.env.KLAVIYO_PRIVATE_KEY;
+  if (!apiKey) return;
+  try {
+    await fetch("https://a.klaviyo.com/api/events/", {
+      method: "POST",
+      headers: {
+        Authorization: `Klaviyo-API-Key ${apiKey}`,
+        "Content-Type": "application/json",
+        revision: "2024-02-15",
+      },
+      body: JSON.stringify({
+        data: {
+          type: "event",
+          attributes: {
+            metric: { data: { type: "metric", attributes: { name: "Pro Accepté Programme Partenaire" } } },
+            profile: { data: { type: "profile", attributes: { email, first_name: firstName, last_name: lastName } } },
+            properties: { code_promo: code },
+          },
+        },
+      }),
+    });
+  } catch (e) {
+    console.warn("[KLAVIYO] Envoi event échoué (non-bloquant):", e);
+  }
+}
+
 // Empêche React Router de re-lancer le loader inutilement (il est lourd)
 // Ne revalide que si une action de CETTE page a été soumise, ou navigation directe
 export function shouldRevalidate({ formAction, defaultShouldRevalidate }: ShouldRevalidateFunctionArgs) {
@@ -216,6 +245,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       console.error("Erreur update metafield:", e);
     }
 
+    // Notif Klaviyo (non-bloquant)
+    await sendKlaviyoProAccepted(email, firstName, lastName, code);
+
     return redirect("/app/validation?success=pro_accepted");
   }
 
@@ -399,6 +431,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         `, { variables: { id: customerId, tags: ["pro_pending"] } });
 
         succeeded++;
+        // Notif Klaviyo (non-bloquant)
+        await sendKlaviyoProAccepted(email, firstName, lastName, code);
       } catch (e) {
         console.error("Erreur bulk accept:", e);
         failed++;
