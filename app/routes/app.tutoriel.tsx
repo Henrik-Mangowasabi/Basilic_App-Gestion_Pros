@@ -404,7 +404,7 @@ export default function TutorielPage() {
             </div>
           </div>
           <div className="tuto-info-box">
-            💡 <strong>Conseil :</strong> Veillez à reverrouiller l&apos;app après chaque session de modification pour protéger vos données.
+            💡 <strong>Session persistante :</strong> Une fois déverrouillé, le mode édition reste actif pendant toute votre session de navigation — vous pouvez changer de page, valider des pros ou modifier des fiches sans ressaisir le mot de passe. Le verrouillage se réactive automatiquement si vous fermez l&apos;onglet.
           </div>
         </div>
 
@@ -713,7 +713,10 @@ export default function TutorielPage() {
             💡 Ce Flow est configuré côté Klaviyo. Pour le modifier (contenu, objet, design), rendez-vous dans Klaviyo → Flux → <strong>Flux - App Pro sante - Email de validation</strong>.
           </div>
           <div className="tuto-info-box">
-            💡 <strong>Déverrouillage requis :</strong> Le mode édition doit être actif pour valider ou refuser des demandes.
+            💡 <strong>Déverrouillage requis :</strong> Le mode édition doit être actif pour valider ou refuser des demandes. Il reste actif tant que vous ne fermez pas l&apos;onglet.
+          </div>
+          <div className="tuto-info-box">
+            💡 <strong>Rafraîchissement automatique :</strong> La liste des pros en attente est actualisée à chaque visite de la page — les nouvelles candidatures apparaissent immédiatement, sans besoin de recharger l&apos;application.
           </div>
           <div className="tuto-info-box tuto-info-box--warning">
             ⚠️ Les informations du code promo par défaut (valeur, type, préfixe) sont configurées dans <strong>Réglages Crédits</strong>. Assurez-vous de les avoir définies avant de valider vos premiers pros.

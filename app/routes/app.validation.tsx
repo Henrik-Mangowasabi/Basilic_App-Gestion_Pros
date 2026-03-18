@@ -154,7 +154,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 let validationCache: Awaited<ReturnType<typeof loader>> | null = null;
 
 export async function clientLoader({ serverLoader }: ClientLoaderFunctionArgs) {
-  if (validationCache) return validationCache;
+  // Pas de cache sur la page validation — on veut toujours les données fraîches
+  // (nouvelles inscriptions de pros en attente)
   const data = await serverLoader<typeof loader>();
   validationCache = data;
   return data;

@@ -29,15 +29,35 @@ type EditModeContextType = {
 
 const EditModeContext = createContext<EditModeContextType | null>(null);
 
-export function EditModeProvider({ children, adminPassword }: { children: ReactNode; adminPassword?: string }) {
-  const [isLocked, setIsLocked] = useState(true);
+export function EditModeProvider({
+  children,
+  adminPassword,
+  initialConfig,
+  initialValidationDefaults,
+}: {
+  children: ReactNode;
+  adminPassword?: string;
+  initialConfig?: { threshold: number; creditAmount: number };
+  initialValidationDefaults?: ValidationDefaults;
+}) {
+  const [isLocked, setIsLockedState] = useState(() => {
+    if (typeof window !== "undefined") {
+      return sessionStorage.getItem("basilic_unlocked") !== "1";
+    }
+    return true;
+  });
   const [showPass, setShowPass] = useState(false);
   const [password, setPassword] = useState("");
   const [lockError, setLockError] = useState("");
   const [showCodeBlock, setShowCodeBlock] = useState(true);
   const [showCABlock, setShowCABlock] = useState(false);
-  const [config, setConfigState] = useState({ threshold: 500, creditAmount: 10 });
-  const [validationDefaults, setValidationDefaultsState] = useState<ValidationDefaults>({ value: 5, type: "%", codePrefix: "PRO_" });
+  const [config, setConfigState] = useState(initialConfig ?? { threshold: 500, creditAmount: 10 });
+  const [validationDefaults, setValidationDefaultsState] = useState<ValidationDefaults>(initialValidationDefaults ?? { value: 5, type: "%", codePrefix: "PRO_" });
+
+  const setIsLocked = useCallback((v: boolean) => {
+    setIsLockedState(v);
+    try { sessionStorage.setItem("basilic_unlocked", v ? "0" : "1"); } catch {}
+  }, []);
 
   const setConfig = useCallback((v: { threshold: number; creditAmount: number }) => {
     setConfigState(v);
