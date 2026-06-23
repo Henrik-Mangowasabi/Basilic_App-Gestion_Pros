@@ -1557,10 +1557,13 @@ function exportToExcel(entries: Array<{
   adresse?: string;
   customer_id?: string;
   tags?: string[];
-}>) {
-  // Préparer les données pour l'export
+  cache_orders_count?: string;
+  cache_revenue?: string;
+  cache_credit_earned?: string;
+  cache_ca_remainder?: string;
+  credit_balance?: number;
+}>, threshold: number) {
   const exportData = entries.map((entry) => {
-    // Séparer le nom complet en prénom et nom
     let firstName = "";
     let lastName = "";
 
@@ -1573,6 +1576,12 @@ function exportToExcel(entries: Array<{
       lastName = nameParts.slice(1).join(" ") || "";
     }
 
+    const earned = parseFloat(entry.cache_credit_earned || "0");
+    const creditBalance = entry.credit_balance || 0;
+    const used = Math.max(0, earned - creditBalance);
+    const caRemainder = parseFloat(entry.cache_ca_remainder || "0");
+    const prochainPalier = Math.max(0, threshold - caRemainder);
+
     return {
       "Prénom": firstName,
       "Nom": lastName,
@@ -1582,14 +1591,18 @@ function exportToExcel(entries: Array<{
       "Code": entry.code || "",
       "Montant": entry.montant || "",
       "Type": entry.type || "%",
+      "Commandes": parseInt(entry.cache_orders_count || "0", 10),
+      "CA Généré (€)": parseFloat(entry.cache_revenue || "0"),
+      "Crédits Gagnés (€)": earned,
+      "Crédits Utilisés (€)": parseFloat(used.toFixed(2)),
+      "Crédits Restants (€)": creditBalance,
+      "Prochain Palier (€)": parseFloat(prochainPalier.toFixed(2)),
     };
   });
 
-  // Créer le workbook et la worksheet
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.json_to_sheet(exportData);
 
-  // Définir la largeur des colonnes
   ws["!cols"] = [
     { wch: 15 }, // Prénom
     { wch: 15 }, // Nom
@@ -1599,15 +1612,18 @@ function exportToExcel(entries: Array<{
     { wch: 15 }, // Code
     { wch: 10 }, // Montant
     { wch: 8 },  // Type
+    { wch: 12 }, // Commandes
+    { wch: 15 }, // CA Généré
+    { wch: 18 }, // Crédits Gagnés
+    { wch: 18 }, // Crédits Utilisés
+    { wch: 18 }, // Crédits Restants
+    { wch: 18 }, // Prochain Palier
   ];
 
-  // Ajouter la feuille au workbook
   XLSX.utils.book_append_sheet(wb, ws, "Partenaires");
 
-  // Générer le fichier et le télécharger
   const today = new Date().toISOString().split("T")[0];
-  const fileName = `partenaires_${today}.xlsx`;
-  XLSX.writeFile(wb, fileName);
+  XLSX.writeFile(wb, `partenaires_${today}.xlsx`);
 }
 
 // --- PAGE PRINCIPALE ---
@@ -1994,7 +2010,7 @@ export default function Index() {
                 <button
                   type="button"
                   className="btn btn--secondary table-card__new-btn"
-                  onClick={() => exportToExcel(entries)}
+                  onClick={() => exportToExcel(entries, serverConfig?.threshold ?? 500)}
                   disabled={entries.length === 0}
                   title="Exporter tous les partenaires en Excel"
                 >
