@@ -255,6 +255,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     if (!id) return { error: "ID manquant" };
 
+    console.log(`[AUDIT][EDIT][UPDATE] ${new Date().toISOString()} | id=${id} | code=${code} | nom="${first_name} ${last_name}" | email=${email}`);
     const result = await updateMetaobjectEntry(admin, id, {
       identification,
       first_name,
@@ -266,6 +267,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       profession,
       adresse,
     });
+    console.log(`[AUDIT][EDIT][UPDATE] résultat: ${result.success ? "OK" : `ERREUR: ${result.error}`}`);
 
     if (result.success) {
       const url = new URL(request.url);
@@ -277,6 +279,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   if (actionType === "delete_entry") {
     const id = formData.get("id") as string;
+    console.log(`[AUDIT][EDIT][DELETE] ${new Date().toISOString()} | id=${id}`);
     const result = await deleteMetaobjectEntry(admin, id);
 
     if (result.success) {

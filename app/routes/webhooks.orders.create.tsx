@@ -241,9 +241,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         if (metaobjectNode) {
           const customerIdField = metaobjectNode.fields.find((f: any) => f.key === "customer_id");
           customerIdValue = customerIdField?.value || null;
+          const nameField = metaobjectNode.fields.find((f: { key: string; value: string }) => f.key === "first_name");
+          const lastNameField = metaobjectNode.fields.find((f: { key: string; value: string }) => f.key === "last_name");
+          console.log(`[AUDIT][WEBHOOK][MATCH] ${new Date().toISOString()} | order=${order.id} | code=${usedCodeLower} | pro_id=${metaobjectNode.id} | pro="${nameField?.value || ""} ${lastNameField?.value || ""}" | montant=${orderAmount}€`);
         }
 
         if (!metaobjectNode) {
+          console.log(`[AUDIT][WEBHOOK][NO_MATCH] ${new Date().toISOString()} | order=${order.id} | code=${usedCodeLower} | aucun pro trouvé`);
           return new Response("OK", { status: 200 });
         }
 
