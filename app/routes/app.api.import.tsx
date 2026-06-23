@@ -19,6 +19,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   // Upsert : si un ID existant est fourni → update, sinon → create
   if (existingId) {
+    console.log(`[AUDIT][IMPORT][UPDATE] ${new Date().toISOString()} | id=${existingId} | code=${code} | nom="${first_name} ${last_name}" | email=${email}`);
     const result = await updateMetaobjectEntry(admin, existingId, {
       first_name,
       last_name,
@@ -29,11 +30,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       profession,
       adresse,
     });
+    console.log(`[AUDIT][IMPORT][UPDATE] résultat: ${result.success ? "OK" : `ERREUR: ${result.error}`}`);
     return new Response(JSON.stringify({ ...result, updated: true }), {
       headers: { "Content-Type": "application/json" },
     });
   }
 
+  console.log(`[AUDIT][IMPORT][CREATE] ${new Date().toISOString()} | ref=${identification} | code=${code} | nom="${first_name} ${last_name}" | email=${email}`);
   const result = await createMetaobjectEntry(admin, {
     identification,
     first_name,
