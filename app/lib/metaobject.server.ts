@@ -360,31 +360,39 @@ export async function createMetaobjectEntry(
 
   try {
     // 2. GESTION CLIENT (Création ou Tag + Metafields) — non-bloquant
-    try {
-      const clientResult = await ensureCustomerPro(
-        admin,
-        fields.email,
-        firstName,
-        lastName,
-        fields.profession,
-        fields.adresse,
-      );
-      if (clientResult.success) {
-        customerIdToSave = clientResult.customerId
-          ? String(clientResult.customerId)
-          : "";
-      } else {
-        console.warn("⚠️ [CLIENT] Sync client échoué (non-bloquant):", clientResult.error);
-      }
-    } catch (clientErr) {
-      console.warn("⚠️ [CLIENT] Sync client exception (non-bloquant):", clientErr);
-    }
-
-    // Fallback : si ensureCustomerPro n'a pas pu résoudre l'ID (Protected Data),
-    // utiliser le customer_id fourni directement (ex: depuis la page validation)
-    if (!customerIdToSave && fields.customer_id) {
+    // Si un customer_id confirmé est fourni (ex: flux validation), on l'utilise en priorité
+    // et on évite la recherche par email qui pourrait trouver le mauvais client
+    if (fields.customer_id) {
       customerIdToSave = String(fields.customer_id);
-      console.log("[CLIENT] Fallback customer_id depuis fields:", customerIdToSave);
+      console.log("[CLIENT] customer_id confirmé depuis fields:", customerIdToSave);
+      // On tague quand même le client sans écraser ses données personnelles
+      try {
+        const tagsAddMutation = `mutation tagsAdd($id: ID!, $tags: [String!]!) { tagsAdd(id: $id, tags: $tags) { userErrors { field message } } }`;
+        await admin.graphql(tagsAddMutation, { variables: { id: customerIdToSave, tags: ["pro_sante"] } });
+      } catch (tagErr) {
+        console.warn("⚠️ [CLIENT] Tag pro_sante échoué (non-bloquant):", tagErr);
+      }
+    } else {
+      // Pas de customer_id connu — recherche ou création par email
+      try {
+        const clientResult = await ensureCustomerPro(
+          admin,
+          fields.email,
+          firstName,
+          lastName,
+          fields.profession,
+          fields.adresse,
+        );
+        if (clientResult.success) {
+          customerIdToSave = clientResult.customerId
+            ? String(clientResult.customerId)
+            : "";
+        } else {
+          console.warn("⚠️ [CLIENT] Sync client échoué (non-bloquant):", clientResult.error);
+        }
+      } catch (clientErr) {
+        console.warn("⚠️ [CLIENT] Sync client exception (non-bloquant):", clientErr);
+      }
     }
 
     // 3. CRÉATION MÉTAOBJET
