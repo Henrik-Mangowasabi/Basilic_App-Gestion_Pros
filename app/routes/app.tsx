@@ -141,8 +141,9 @@ export function ErrorBoundary() {
   );
 }
 
-// Ne re-exécute le loader root qu'au premier chargement, pas à chaque navigation
-export const shouldRevalidate = (_: ShouldRevalidateFunctionArgs) => false;
+// Re-exécute le loader root après une action sur la page validation (pour mettre à jour le badge)
+export const shouldRevalidate = ({ formAction }: ShouldRevalidateFunctionArgs) =>
+  formAction?.startsWith("/app/validation") ?? false;
 
 export const headers: HeadersFunction = (headersArgs) => {
   return boundary.headers(headersArgs);

@@ -66,6 +66,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             firstName
             lastName
             email
+            createdAt
             defaultAddress {
               address1
               city
@@ -96,6 +97,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     firstName: string;
     lastName: string;
     email: string;
+    createdAt: string;
     address: string;
     profession: string;
     metafieldValue: string;
@@ -124,6 +126,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             firstName: c.firstName || "",
             lastName: c.lastName || "",
             email: c.email || "",
+            createdAt: c.createdAt || "",
             address: adresseMeta || (addr
               ? [addr.address1, addr.city, addr.zip, addr.country].filter(Boolean).join(", ")
               : "—"),
@@ -1003,6 +1006,7 @@ export default function ValidationPage() {
                 <th className="ui-table__th ui-table__th--base">Email</th>
                 <th className="ui-table__th ui-table__th--base">Adresse</th>
                 <th className="ui-table__th ui-table__th--base">Profession</th>
+                <th className="ui-table__th ui-table__th--base" style={{ whiteSpace: "nowrap" }}>Date postulation</th>
                 <th className="ui-table__th ui-table__th--center ui-table__th--base" style={{ width: "60px" }}>Lien</th>
                 <th className="ui-table__th ui-table__th--center ui-table__th--base val-th--etat">État</th>
                 <th className="ui-table__th ui-table__th--center ui-table__th--base">Actions</th>
@@ -1011,7 +1015,7 @@ export default function ValidationPage() {
             <tbody className="ui-table__tbody">
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="ui-table__td ui-table__td--empty">
+                  <td colSpan={9} className="ui-table__td ui-table__td--empty">
                     {searchQuery
                       ? "Aucun résultat pour cette recherche."
                       : "Aucun professionnel en attente de validation."}
@@ -1134,6 +1138,11 @@ export default function ValidationPage() {
                             </span>
                           </div>
                         )}
+                      </td>
+                      <td className="ui-table__td" style={{ whiteSpace: "nowrap" }}>
+                        {customer.createdAt
+                          ? new Date(customer.createdAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric" })
+                          : "—"}
                       </td>
                       <td className="ui-table__td ui-table__td--center">
                         <a
