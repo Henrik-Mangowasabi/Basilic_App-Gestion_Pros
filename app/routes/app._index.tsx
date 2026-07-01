@@ -1682,7 +1682,7 @@ export default function Index() {
 
   const filteredEntries = useMemo(() => entries.filter(e => {
     const q = searchQuery.toLowerCase();
-    return !q || [e.first_name, e.last_name, e.email, e.code, (e as { profession?: string }).profession].some(v => v && String(v).toLowerCase().includes(q));
+    return !q || [e.first_name, e.last_name, e.name, e.email, e.code, (e as { profession?: string }).profession].some(v => v && String(v).toLowerCase().includes(q));
   }), [entries, searchQuery]);
 
   const sortedEntries = useMemo(() => sortConfig ? [...filteredEntries].sort((a, b) => {
