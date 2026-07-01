@@ -35,24 +35,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       let restRevenue = 0;
       let restSuccess = false;
 
-      // DEBUG TEMPORAIRE : inspecter JM203098 directement par son ID numérique Shopify
-      try {
-        const debugId = "12717639172474";
-        const debugUrl = `https://${session.shop}/admin/api/2025-10/orders/${debugId}.json?fields=id,name,created_at,discount_codes,discount_applications,line_items`;
-        console.log(`[DEBUG] Fetch order ID ${debugId}`);
-        const debugResp = await fetch(debugUrl, { headers: { "X-Shopify-Access-Token": session.accessToken!, "Content-Type": "application/json" } });
-        console.log(`[DEBUG] order ${debugId} HTTP: ${debugResp.status}`);
-        const debugData = await debugResp.json() as any;
-        const o = debugData.order;
-        if (o) {
-          console.log(`[DEBUG ${o.name}] date=${o.created_at?.slice(0,10)}`);
-          console.log(`[DEBUG ${o.name}] discount_codes: ${JSON.stringify(o.discount_codes)}`);
-          console.log(`[DEBUG ${o.name}] discount_applications: ${JSON.stringify(o.discount_applications)}`);
-          console.log(`[DEBUG ${o.name}] line_items[0].discount_allocations: ${JSON.stringify(o.line_items?.[0]?.discount_allocations)}`);
-        } else {
-          console.log(`[DEBUG order ${debugId}] non trouvée: ${JSON.stringify(debugData)}`);
-        }
-      } catch(e) { console.error(`[DEBUG order 12717639172474] erreur:`, e); }
+      // DEBUG TEMPORAIRE : récupérer toutes les commandes du client par customer_id
+      if (customerId) {
+        try {
+          const numericCustomerId = customerId.split('/').pop();
+          const custUrl = `https://${session.shop}/admin/api/2025-10/customers/${numericCustomerId}/orders.json?status=any&limit=250&fields=id,name,created_at,subtotal_price,financial_status,cancel_reason,discount_codes,discount_applications`;
+          console.log(`[DEBUG CUSTOMER] Fetch commandes client ${numericCustomerId}`);
+          const custResp = await fetch(custUrl, { headers: { "X-Shopify-Access-Token": session.accessToken!, "Content-Type": "application/json" } });
+          console.log(`[DEBUG CUSTOMER] HTTP: ${custResp.status}`);
+          const custData = await custResp.json() as any;
+          const custOrders = custData.orders || [];
+          console.log(`[DEBUG CUSTOMER] ${custOrders.length} commandes totales pour ce client`);
+          for (const o of custOrders) {
+            console.log(`[DEBUG CUSTOMER] ${o.name} (${o.created_at?.slice(0,10)}) status=${o.financial_status} discount_codes=${JSON.stringify(o.discount_codes)} discount_applications=${JSON.stringify(o.discount_applications?.map((a: any) => ({ type: a.type, code: a.code, title: a.title })))}`);
+          }
+        } catch(e) { console.error(`[DEBUG CUSTOMER] erreur:`, e); }
+      }
 
       try {
         const restUrl = `https://${session.shop}/admin/api/2025-10/orders.json?discount_code=${encodeURIComponent(codeUpper)}&status=any&limit=250&fields=id,name,created_at,discount_codes,subtotal_price,financial_status,cancel_reason,refunds`;
