@@ -136,7 +136,6 @@ const FULL_SCAN_QUERY = `#graphql
                 targetSelection
                 ... on DiscountCodeApplication {
                   code
-                  applicable
                 }
                 ... on AutomaticDiscountApplication {
                   title
