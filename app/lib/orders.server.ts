@@ -122,6 +122,8 @@ const FULL_SCAN_QUERY = `#graphql
     orders(first: 250, query: $qs, after: $cursor) {
       edges {
         node {
+          name
+          createdAt
           subtotalPriceSet { shopMoney { amount } }
           totalRefundedSet { shopMoney { amount } }
           totalRefundedShippingSet { shopMoney { amount } }
@@ -129,8 +131,22 @@ const FULL_SCAN_QUERY = `#graphql
           discountApplications(first: 10) {
             edges {
               node {
+                __typename
+                allocationMethod
+                targetSelection
                 ... on DiscountCodeApplication {
                   code
+                  applicable
+                }
+                ... on AutomaticDiscountApplication {
+                  title
+                }
+                ... on ManualDiscountApplication {
+                  title
+                  description
+                }
+                ... on ScriptDiscountApplication {
+                  title
                 }
               }
             }
@@ -183,6 +199,16 @@ export async function queryAllOrdersForCode(
           const productRefunded = Math.max(0, totalRefunded - shippingRefunded);
           revenue += Math.max(0, subtotal - productRefunded);
           count++;
+          console.log(`[FULL SCAN] ✓ ${order.name} (${order.createdAt?.slice(0,10)}) → discountCodes=${JSON.stringify(order.discountCodes)}`);
+        } else {
+          // Logger toute commande avec un discount non-vide dont le titre/code contient notre cible (diagnostic)
+          const apps = order.discountApplications?.edges || [];
+          for (const { node: app } of apps) {
+            const label = app.code || app.title || "";
+            if (label.toUpperCase().includes(targetUpper)) {
+              console.log(`[FULL SCAN] ⚠ ${order.name} (${order.createdAt?.slice(0,10)}) contient "${label}" (type: ${app.__typename}) mais NON compté → discountCodes=${JSON.stringify(order.discountCodes)}, app=${JSON.stringify(app)}`);
+            }
+          }
         }
       }
 
