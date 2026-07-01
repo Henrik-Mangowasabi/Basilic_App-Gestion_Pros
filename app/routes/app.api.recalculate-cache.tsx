@@ -4,7 +4,7 @@ import { updateCustomerProMetafields } from "../lib/customer.server";
 import { queryAllOrdersForCode } from "../lib/orders.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { admin } = await authenticate.admin(request);
+  const { admin, session } = await authenticate.admin(request);
   const formData = await request.formData();
 
   const metaobjectId = formData.get("metaobjectId") as string;
@@ -36,13 +36,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       let restSuccess = false;
 
       try {
-        const restResp = await (admin as any).rest.get({
-          path: "orders",
-          query: {
-            discount_code: codeUpper,
-            status: "any",
-            limit: 250,
-            fields: "id,name,created_at,discount_codes,subtotal_price,financial_status,cancel_reason,refunds",
+        const restUrl = `https://${session.shop}/admin/api/2025-10/orders.json?discount_code=${encodeURIComponent(codeUpper)}&status=any&limit=250&fields=id,name,created_at,discount_codes,subtotal_price,financial_status,cancel_reason,refunds`;
+        const restResp = await fetch(restUrl, {
+          headers: {
+            "X-Shopify-Access-Token": session.accessToken!,
+            "Content-Type": "application/json",
           },
         });
         const restData = await restResp.json() as any;
