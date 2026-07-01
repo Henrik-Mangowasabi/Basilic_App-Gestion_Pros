@@ -1,8 +1,7 @@
 import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
-import { getMetaobjectEntries } from "../lib/metaobject.server";
 import { updateCustomerProMetafields } from "../lib/customer.server";
-import { queryOrderStatsByCodeBatches } from "../lib/orders.server";
+import { queryAllOrdersForCode } from "../lib/orders.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
@@ -30,21 +29,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     totalRevenue = parseFloat(preRevenueStr) || 0;
     totalOrders = parseInt(preCountStr, 10) || 0;
   } else {
-    // Requête Shopify : tous les codes en lots de 50 (scalable à 2 000+ pros)
-    // On interroge tous les codes (pas seulement le code cible) car Shopify retourne
-    // des résultats incomplets avec un seul discount_code:X isolé.
-    const allEntriesResult = await getMetaobjectEntries(admin);
-    const allCodes = [...new Set<string>(
-      allEntriesResult.entries
-        .map((e: any) => e.code?.toUpperCase())
-        .filter(Boolean),
-    )];
-
+    // Scan complet de toutes les commandes (pas de filtre discount_code:X) :
+    // plus fiable que la recherche OR-query car Shopify peut avoir un index incomplet
+    // pour les codes dont le discount a été recréé.
     try {
-      const statsMap = await queryOrderStatsByCodeBatches(admin, allCodes);
-      const stats = statsMap.get(codeUpper);
-      totalRevenue = stats?.revenue ?? 0;
-      totalOrders = stats?.count ?? 0;
+      const stats = await queryAllOrdersForCode(admin, codeUpper);
+      totalRevenue = stats.revenue;
+      totalOrders = stats.count;
     } catch (e) {
       return new Response(JSON.stringify({ error: `Erreur requête commandes: ${String(e)}` }), {
         headers: { "Content-Type": "application/json" },

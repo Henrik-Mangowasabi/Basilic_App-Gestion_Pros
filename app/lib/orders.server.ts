@@ -117,6 +117,87 @@ export async function queryOrderStatsByCodeBatches(
   return statsMap;
 }
 
+const FULL_SCAN_QUERY = `#graphql
+  query GetAllOrders($qs: String!, $cursor: String) {
+    orders(first: 250, query: $qs, after: $cursor) {
+      edges {
+        node {
+          subtotalPriceSet { shopMoney { amount } }
+          totalRefundedSet { shopMoney { amount } }
+          totalRefundedShippingSet { shopMoney { amount } }
+          discountCodes
+          discountApplications(first: 10) {
+            edges {
+              node {
+                ... on DiscountCodeApplication {
+                  code
+                }
+              }
+            }
+          }
+        }
+      }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+`;
+
+/**
+ * Scan complet de toutes les commandes pour un code unique.
+ * Contourne le problème de l'index Shopify (discount_code:X incomplet quand discount recréé).
+ * À utiliser pour le recalcul d'un seul pro — trop lent pour tous les pros d'un coup.
+ */
+export async function queryAllOrdersForCode(
+  admin: AdminApiContext,
+  targetCode: string,
+): Promise<{ revenue: number; count: number }> {
+  const targetUpper = targetCode.toUpperCase();
+  let revenue = 0;
+  let count = 0;
+  let hasMore = true;
+  let cursor: string | null = null;
+  let totalScanned = 0;
+
+  while (hasMore) {
+    try {
+      const resp = await (admin as any).graphql(FULL_SCAN_QUERY, {
+        variables: { qs: DEFAULT_STATUS_FILTER, cursor },
+      });
+      const data = await resp.json() as any;
+      const edges = data.data?.orders?.edges || [];
+      totalScanned += edges.length;
+
+      for (const edge of edges) {
+        const order = edge.node;
+        const allOrderCodes = new Set<string>();
+        for (const code of order.discountCodes || []) allOrderCodes.add(code.toUpperCase());
+        for (const appEdge of order.discountApplications?.edges || []) {
+          const code = appEdge.node?.code;
+          if (code) allOrderCodes.add(code.toUpperCase());
+        }
+
+        if (allOrderCodes.has(targetUpper)) {
+          const subtotal = parseFloat(order.subtotalPriceSet?.shopMoney?.amount || "0");
+          const totalRefunded = parseFloat(order.totalRefundedSet?.shopMoney?.amount || "0");
+          const shippingRefunded = parseFloat(order.totalRefundedShippingSet?.shopMoney?.amount || "0");
+          const productRefunded = Math.max(0, totalRefunded - shippingRefunded);
+          revenue += Math.max(0, subtotal - productRefunded);
+          count++;
+        }
+      }
+
+      hasMore = data.data?.orders?.pageInfo?.hasNextPage ?? false;
+      cursor = data.data?.orders?.pageInfo?.endCursor ?? null;
+    } catch (e) {
+      console.error(`[FULL SCAN] Erreur scan commandes pour ${targetCode}:`, e);
+      break;
+    }
+  }
+
+  console.log(`[FULL SCAN] ${targetCode}: ${count} commandes sur ${totalScanned} scannées, CA=${revenue.toFixed(2)}€`);
+  return { revenue, count };
+}
+
 const METAOBJECT_TYPE = "mm_pro_de_sante";
 
 /**
