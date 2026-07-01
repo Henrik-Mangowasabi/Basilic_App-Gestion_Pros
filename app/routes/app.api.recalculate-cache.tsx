@@ -35,24 +35,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       let restRevenue = 0;
       let restSuccess = false;
 
-      // DEBUG TEMPORAIRE : fetch les 7 commandes d'Adam directement par ID
-      for (const debugId of ["13165380731258","13147536228730","13045212152186","12938993140090","12932193681786","12929380647290","12717639172474"]) {
-        try {
-          const debugUrl = `https://${session.shop}/admin/api/2025-10/orders/${debugId}.json?fields=id,name,created_at,financial_status,cancel_reason,subtotal_price,discount_codes,discount_applications,line_items`;
-          const debugResp = await fetch(debugUrl, { headers: { "X-Shopify-Access-Token": session.accessToken!, "Content-Type": "application/json" } });
-          const debugData = await debugResp.json() as any;
-          const o = debugData.order;
-          if (o) {
-            console.log(`[DEBUG ID ${debugId}] ${o.name} (${o.created_at?.slice(0,10)}) status=${o.financial_status} cancel=${o.cancel_reason}`);
-            console.log(`[DEBUG ID ${debugId}] discount_codes=${JSON.stringify(o.discount_codes)}`);
-            console.log(`[DEBUG ID ${debugId}] discount_applications=${JSON.stringify(o.discount_applications?.map((a: any) => ({ type: a.type, code: a.code, title: a.title })))}`);
-            console.log(`[DEBUG ID ${debugId}] line_items[0].discount_allocations=${JSON.stringify(o.line_items?.[0]?.discount_allocations)}`);
-          } else {
-            console.log(`[DEBUG ID ${debugId}] HTTP ${debugResp.status} → ${JSON.stringify(debugData)}`);
-          }
-        } catch(e) { console.error(`[DEBUG ID ${debugId}] erreur:`, e); }
-      }
-
       try {
         const restUrl = `https://${session.shop}/admin/api/2025-10/orders.json?discount_code=${encodeURIComponent(codeUpper)}&status=any&limit=250&fields=id,name,created_at,discount_codes,subtotal_price,financial_status,cancel_reason,refunds`;
         const restResp = await fetch(restUrl, {
