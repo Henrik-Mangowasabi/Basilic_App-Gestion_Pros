@@ -35,6 +35,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       let restRevenue = 0;
       let restSuccess = false;
 
+      // DEBUG TEMPORAIRE : inspecter JM203098 directement par ID
+      try {
+        const debugUrl = `https://${session.shop}/admin/api/2025-10/orders/12717639172474.json`;
+        const debugResp = await fetch(debugUrl, { headers: { "X-Shopify-Access-Token": session.accessToken!, "Content-Type": "application/json" } });
+        const debugData = await debugResp.json() as any;
+        const o = debugData.order;
+        if (o) {
+          console.log(`[DEBUG JM203098] discount_codes: ${JSON.stringify(o.discount_codes)}`);
+          console.log(`[DEBUG JM203098] discount_applications: ${JSON.stringify(o.discount_applications)}`);
+          console.log(`[DEBUG JM203098] line_items[0].discount_allocations: ${JSON.stringify(o.line_items?.[0]?.discount_allocations)}`);
+        }
+      } catch(e) { console.warn("[DEBUG JM203098] erreur:", e); }
+
       try {
         const restUrl = `https://${session.shop}/admin/api/2025-10/orders.json?discount_code=${encodeURIComponent(codeUpper)}&status=any&limit=250&fields=id,name,created_at,discount_codes,subtotal_price,financial_status,cancel_reason,refunds`;
         const restResp = await fetch(restUrl, {
