@@ -29,13 +29,56 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     totalRevenue = parseFloat(preRevenueStr) || 0;
     totalOrders = parseInt(preCountStr, 10) || 0;
   } else {
-    // Scan complet de toutes les commandes (pas de filtre discount_code:X) :
-    // plus fiable que la recherche OR-query car Shopify peut avoir un index incomplet
-    // pour les codes dont le discount a été recréé.
     try {
-      const stats = await queryAllOrdersForCode(admin, codeUpper);
-      totalRevenue = stats.revenue;
-      totalOrders = stats.count;
+      // Test REST API : stocke le code en texte brut sur la commande,
+      // donc fonctionne même si le discount a été supprimé et recréé.
+      let restCount = 0;
+      let restRevenue = 0;
+      try {
+        const restResp = await (admin as any).rest.get({
+          path: "orders",
+          query: {
+            discount_code: codeUpper,
+            status: "any",
+            limit: 250,
+            fields: "id,name,created_at,discount_codes,subtotal_price,total_discounts,financial_status,cancel_reason,refunds",
+          },
+        });
+        const restData = await restResp.json() as any;
+        const restOrders = restData.orders || [];
+        console.log(`[REST API] ${codeUpper}: ${restOrders.length} commandes trouvées`);
+        for (const o of restOrders) {
+          const isRefunded = o.financial_status === "refunded" || o.financial_status === "voided";
+          const isCancelled = !!o.cancel_reason;
+          if (!isRefunded && !isCancelled) {
+            const subtotal = parseFloat(o.subtotal_price || "0");
+            // Calculer remboursements produits (pas shipping)
+            let productRefunded = 0;
+            for (const refund of o.refunds || []) {
+              for (const ri of refund.refund_line_items || []) {
+                productRefunded += parseFloat(ri.subtotal || "0");
+              }
+            }
+            restRevenue += Math.max(0, subtotal - productRefunded);
+            restCount++;
+            console.log(`[REST API] ✓ ${o.name} (${o.created_at?.slice(0,10)}) discount_codes=${JSON.stringify(o.discount_codes)} subtotal=${o.subtotal_price}`);
+          }
+        }
+        console.log(`[REST API] Résultat final: ${restCount} commandes, CA=${restRevenue.toFixed(2)}€`);
+      } catch (restErr) {
+        console.warn(`[REST API] Erreur (non bloquant):`, restErr);
+      }
+
+      // Utiliser REST si elle trouve plus que le scan GraphQL
+      const graphqlStats = await queryAllOrdersForCode(admin, codeUpper);
+      if (restCount > graphqlStats.count) {
+        console.log(`[REST API] REST (${restCount}) > GraphQL (${graphqlStats.count}) → utilisation REST`);
+        totalRevenue = restRevenue;
+        totalOrders = restCount;
+      } else {
+        totalRevenue = graphqlStats.revenue;
+        totalOrders = graphqlStats.count;
+      }
     } catch (e) {
       return new Response(JSON.stringify({ error: `Erreur requête commandes: ${String(e)}` }), {
         headers: { "Content-Type": "application/json" },
