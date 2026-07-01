@@ -35,21 +35,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       let restRevenue = 0;
       let restSuccess = false;
 
-      // DEBUG TEMPORAIRE : récupérer toutes les commandes du client par customer_id
-      if (customerId) {
+      // DEBUG TEMPORAIRE : fetch les 7 commandes d'Adam directement par ID
+      for (const debugId of ["13165380731258","13147536228730","13045212152186","12938993140090","12932193681786","12929380647290","12717639172474"]) {
         try {
-          const numericCustomerId = customerId.split('/').pop();
-          const custUrl = `https://${session.shop}/admin/api/2025-10/customers/${numericCustomerId}/orders.json?status=any&limit=250&fields=id,name,created_at,subtotal_price,financial_status,cancel_reason,discount_codes,discount_applications`;
-          console.log(`[DEBUG CUSTOMER] Fetch commandes client ${numericCustomerId}`);
-          const custResp = await fetch(custUrl, { headers: { "X-Shopify-Access-Token": session.accessToken!, "Content-Type": "application/json" } });
-          console.log(`[DEBUG CUSTOMER] HTTP: ${custResp.status}`);
-          const custData = await custResp.json() as any;
-          const custOrders = custData.orders || [];
-          console.log(`[DEBUG CUSTOMER] ${custOrders.length} commandes totales pour ce client`);
-          for (const o of custOrders) {
-            console.log(`[DEBUG CUSTOMER] ${o.name} (${o.created_at?.slice(0,10)}) status=${o.financial_status} discount_codes=${JSON.stringify(o.discount_codes)} discount_applications=${JSON.stringify(o.discount_applications?.map((a: any) => ({ type: a.type, code: a.code, title: a.title })))}`);
+          const debugUrl = `https://${session.shop}/admin/api/2025-10/orders/${debugId}.json?fields=id,name,created_at,financial_status,cancel_reason,subtotal_price,discount_codes,discount_applications,line_items`;
+          const debugResp = await fetch(debugUrl, { headers: { "X-Shopify-Access-Token": session.accessToken!, "Content-Type": "application/json" } });
+          const debugData = await debugResp.json() as any;
+          const o = debugData.order;
+          if (o) {
+            console.log(`[DEBUG ID ${debugId}] ${o.name} (${o.created_at?.slice(0,10)}) status=${o.financial_status} cancel=${o.cancel_reason}`);
+            console.log(`[DEBUG ID ${debugId}] discount_codes=${JSON.stringify(o.discount_codes)}`);
+            console.log(`[DEBUG ID ${debugId}] discount_applications=${JSON.stringify(o.discount_applications?.map((a: any) => ({ type: a.type, code: a.code, title: a.title })))}`);
+            console.log(`[DEBUG ID ${debugId}] line_items[0].discount_allocations=${JSON.stringify(o.line_items?.[0]?.discount_allocations)}`);
+          } else {
+            console.log(`[DEBUG ID ${debugId}] HTTP ${debugResp.status} → ${JSON.stringify(debugData)}`);
           }
-        } catch(e) { console.error(`[DEBUG CUSTOMER] erreur:`, e); }
+        } catch(e) { console.error(`[DEBUG ID ${debugId}] erreur:`, e); }
       }
 
       try {
