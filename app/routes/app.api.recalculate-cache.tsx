@@ -30,10 +30,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     totalOrders = parseInt(preCountStr, 10) || 0;
   } else {
     try {
-      // Test REST API : stocke le code en texte brut sur la commande,
-      // donc fonctionne même si le discount a été supprimé et recréé.
+      // Étape 1 : REST API (rapide — filtre par code, trouve commandes même si discount recréé)
       let restCount = 0;
       let restRevenue = 0;
+      let restSuccess = false;
+
       try {
         const restResp = await (admin as any).rest.get({
           path: "orders",
@@ -41,43 +42,41 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             discount_code: codeUpper,
             status: "any",
             limit: 250,
-            fields: "id,name,created_at,discount_codes,subtotal_price,total_discounts,financial_status,cancel_reason,refunds",
+            fields: "id,name,created_at,discount_codes,subtotal_price,financial_status,cancel_reason,refunds",
           },
         });
         const restData = await restResp.json() as any;
         const restOrders = restData.orders || [];
-        console.log(`[REST API] ${codeUpper}: ${restOrders.length} commandes trouvées`);
+        console.log(`[REST API] ${codeUpper}: ${restOrders.length} commandes brutes`);
+
         for (const o of restOrders) {
-          const isRefunded = o.financial_status === "refunded" || o.financial_status === "voided";
-          const isCancelled = !!o.cancel_reason;
-          if (!isRefunded && !isCancelled) {
-            const subtotal = parseFloat(o.subtotal_price || "0");
-            // Calculer remboursements produits (pas shipping)
-            let productRefunded = 0;
-            for (const refund of o.refunds || []) {
-              for (const ri of refund.refund_line_items || []) {
-                productRefunded += parseFloat(ri.subtotal || "0");
-              }
+          if (o.financial_status === "refunded" || o.financial_status === "voided" || o.cancel_reason) continue;
+          const subtotal = parseFloat(o.subtotal_price || "0");
+          let productRefunded = 0;
+          for (const refund of o.refunds || []) {
+            for (const ri of refund.refund_line_items || []) {
+              productRefunded += parseFloat(ri.subtotal || "0");
             }
-            restRevenue += Math.max(0, subtotal - productRefunded);
-            restCount++;
-            console.log(`[REST API] ✓ ${o.name} (${o.created_at?.slice(0,10)}) discount_codes=${JSON.stringify(o.discount_codes)} subtotal=${o.subtotal_price}`);
           }
+          restRevenue += Math.max(0, subtotal - productRefunded);
+          restCount++;
+          console.log(`[REST API] ✓ ${o.name} (${o.created_at?.slice(0,10)}) subtotal=${o.subtotal_price}`);
         }
-        console.log(`[REST API] Résultat final: ${restCount} commandes, CA=${restRevenue.toFixed(2)}€`);
+        console.log(`[REST API] Résultat: ${restCount} commandes valides, CA=${restRevenue.toFixed(2)}€`);
+        restSuccess = true;
       } catch (restErr) {
-        console.warn(`[REST API] Erreur (non bloquant):`, restErr);
+        console.warn(`[REST API] Erreur, fallback scan complet:`, restErr);
       }
 
-      // Utiliser REST si elle trouve plus que le scan GraphQL
-      const graphqlStats = await queryAllOrdersForCode(admin, codeUpper);
-      if (restCount > graphqlStats.count) {
-        console.log(`[REST API] REST (${restCount}) > GraphQL (${graphqlStats.count}) → utilisation REST`);
+      if (restSuccess) {
+        // REST API a fonctionné → résultat direct, pas de scan complet
         totalRevenue = restRevenue;
         totalOrders = restCount;
       } else {
-        totalRevenue = graphqlStats.revenue;
-        totalOrders = graphqlStats.count;
+        // Fallback : scan complet GraphQL (plus lent mais exhaustif)
+        const stats = await queryAllOrdersForCode(admin, codeUpper);
+        totalRevenue = stats.revenue;
+        totalOrders = stats.count;
       }
     } catch (e) {
       return new Response(JSON.stringify({ error: `Erreur requête commandes: ${String(e)}` }), {
