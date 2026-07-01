@@ -102,16 +102,18 @@ export async function ensureCustomerPro(admin: AdminApiContext, rawEmail: string
   const searchQuery = `query { customers(first: 1, query: "email:${email}") { edges { node { id, tags } } } }`;
   let customerId = null;
   let currentTags: string[] = [];
+  let isExistingCustomer = false;
 
   try {
     const response = await admin.graphql(searchQuery);
     const data = await response.json() as any;
     const existing = data.data?.customers?.edges?.[0]?.node;
-    
+
     if (existing) {
       console.log(`[CUSTOMER] Trouvé existant : ${existing.id}`);
       customerId = existing.id;
       currentTags = existing.tags || [];
+      isExistingCustomer = true;
     }
   } catch (e) { console.error("Erreur recherche:", e); }
 
@@ -119,7 +121,7 @@ export async function ensureCustomerPro(admin: AdminApiContext, rawEmail: string
   if (!customerId) {
     console.log(`[CUSTOMER] Inconnu. Création en cours...`);
     const createMutation = `mutation customerCreate($input: CustomerInput!) { customerCreate(input: $input) { customer { id }, userErrors { field message } } }`;
-    
+
     const variables = {
       input: {
         email: email,
@@ -146,15 +148,22 @@ export async function ensureCustomerPro(admin: AdminApiContext, rawEmail: string
       customerId = d.data?.customerCreate?.customer?.id;
       console.log(`[CUSTOMER] Créé avec succès : ${customerId}`);
     } catch (e) { return { success: false, error: String(e) }; }
-  } 
+  }
 
-  // 3. Mise à jour complète (Nom, Email, Profession, Adresse physique) — non-bloquant
+  // 3. Sync données selon si le client existait déjà ou vient d'être créé
   if (customerId) {
-      try {
-        console.log(`[CUSTOMER] Synchronisation finale des données pour ${customerId}...`);
-        await updateCustomerInShopify(admin, customerId, email, firstName, lastName, profession, adresse);
-      } catch (updateErr) {
-        console.warn("[CUSTOMER] updateCustomerInShopify échoué (non-bloquant):", updateErr);
+      if (!isExistingCustomer) {
+        // Nouveau client créé pour ce pro : on peut synchroniser toutes ses données
+        try {
+          console.log(`[CUSTOMER] Nouveau client — synchronisation complète pour ${customerId}...`);
+          await updateCustomerInShopify(admin, customerId, email, firstName, lastName, profession, adresse);
+        } catch (updateErr) {
+          console.warn("[CUSTOMER] updateCustomerInShopify échoué (non-bloquant):", updateErr);
+        }
+      } else {
+        // Client Shopify existant : ne jamais écraser son nom/adresse réelle
+        // (risque de corrompre les données d'un autre client si l'email était erroné)
+        console.log(`[CUSTOMER] Client existant — pas de modification nom/adresse pour ${customerId}`);
       }
 
       // Ajout du Tag si manquant — non-bloquant

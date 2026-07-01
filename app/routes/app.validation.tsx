@@ -389,6 +389,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           type,
           profession,
           adresse,
+          customer_id: customerId,
         });
 
         if (!result.success) {
