@@ -191,6 +191,12 @@ export async function queryAllOrdersForCode(
           if (code) allOrderCodes.add(code.toUpperCase());
         }
 
+        // Log ciblé pour commandes spécifiques à diagnostiquer (temporaire)
+        const DEBUG_NAMES = ["JM207072", "JM206249", "JM205823", "JM203098"];
+        if (DEBUG_NAMES.includes(order.name)) {
+          console.log(`[DEBUG ORDER] ${order.name} (${order.createdAt?.slice(0,10)}) discountCodes=${JSON.stringify(order.discountCodes)} discountApplications=${JSON.stringify(order.discountApplications?.edges?.map((e: any) => e.node))}`);
+        }
+
         if (allOrderCodes.has(targetUpper)) {
           const subtotal = parseFloat(order.subtotalPriceSet?.shopMoney?.amount || "0");
           const totalRefunded = parseFloat(order.totalRefundedSet?.shopMoney?.amount || "0");
@@ -200,7 +206,6 @@ export async function queryAllOrdersForCode(
           count++;
           console.log(`[FULL SCAN] ✓ ${order.name} (${order.createdAt?.slice(0,10)}) → discountCodes=${JSON.stringify(order.discountCodes)}`);
         } else {
-          // Logger toute commande avec un discount non-vide dont le titre/code contient notre cible (diagnostic)
           const apps = order.discountApplications?.edges || [];
           for (const { node: app } of apps) {
             const label = app.code || app.title || "";
