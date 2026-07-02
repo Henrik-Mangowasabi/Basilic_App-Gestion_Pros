@@ -2248,7 +2248,7 @@ export default function Index() {
               {showCABlock && badgeLeft !== null && <div className="block-badge block-badge--blue" style={{ left: `${badgeLeft.ca}px` }}><svg width="10" height="10" viewBox="0 0 20 20" fill="currentColor"><path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zm6-4a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zm6-3a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z" /></svg> Chiffre d&apos;Affaires</div>}
               {showLimitationBlock && badgeLeft !== null && <div className="block-badge" style={{ left: `${badgeLeft.limitation}px`, backgroundColor: "rgb(255, 251, 235)", color: "#92400e" }}><svg width="10" height="10" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" /></svg> Limitation</div>}
               <div ref={tableScrollRef} className="table-scroll">
-              <table className="ui-table" style={{ tableLayout: "fixed", width: "100%", minWidth: `${(showCodeBlock || showCABlock || showLimitationBlock ? 272 : 532) + (showCodeBlock ? 550 : 0) + (showCABlock ? 550 : 0) + (showLimitationBlock ? 600 : 0)}px` }}>
+              <table className="ui-table" style={{ tableLayout: "fixed", width: "100%", minWidth: `${(showCodeBlock || showCABlock || showLimitationBlock ? 272 : 532) + (showCodeBlock ? 550 : 0) + (showCABlock ? 550 : 0) + (showLimitationBlock ? 460 : 0)}px` }}>
                 <colgroup>
                   <col style={{ width: "40px" }} />
                   <col />
@@ -2258,7 +2258,7 @@ export default function Index() {
                   {!(showCodeBlock || showCABlock || showLimitationBlock) && <col style={{ width: "60px" }} />}
                   {showCodeBlock && <><col style={{ width: "110px" }} /><col style={{ width: "110px" }} /><col style={{ width: "110px" }} /><col style={{ width: "110px" }} /><col style={{ width: "110px" }} /></>}
                   {showCABlock && <><col style={{ width: "110px" }} /><col style={{ width: "110px" }} /><col style={{ width: "110px" }} /><col style={{ width: "110px" }} /><col style={{ width: "110px" }} /><col style={{ width: "120px" }} /></>}
-                  {showLimitationBlock && <><col style={{ width: "130px" }} /><col style={{ width: "90px" }} /><col style={{ width: "120px" }} /><col style={{ width: "120px" }} /><col style={{ width: "140px" }} /></>}
+                  {showLimitationBlock && <><col style={{ width: "130px" }} /><col style={{ width: "90px" }} /><col style={{ width: "120px" }} /><col style={{ width: "120px" }} /></>}
                   <col style={{ width: "52px" }} />
                 </colgroup>
                 <thead className="ui-table__thead">
@@ -2309,7 +2309,6 @@ export default function Index() {
                       <th className="ui-table__th mf-th--dev--amber ui-table__th--center ui-table__th--sortable" onClick={() => handleSort("bloque")}>Bloqué <SortIcon active={sortConfig?.key === "bloque"} dir={sortConfig?.key === "bloque" ? sortConfig.dir : null} /></th>
                       <th className="ui-table__th mf-th--dev--amber ui-table__th--center ui-table__th--sortable" onClick={() => handleSort("limitation_date")}>Bloqué le <SortIcon active={sortConfig?.key === "limitation_date"} dir={sortConfig?.key === "limitation_date" ? sortConfig.dir : null} /></th>
                       <th className="ui-table__th mf-th--dev--amber ui-table__th--center ui-table__th--sortable" onClick={() => handleSort("limitation_unlock_date")}>Déblocage le <SortIcon active={sortConfig?.key === "limitation_unlock_date"} dir={sortConfig?.key === "limitation_unlock_date" ? sortConfig.dir : null} /></th>
-                      <th className="ui-table__th mf-th--dev--amber ui-table__th--center">Changer</th>
                     </>)}
                     <th className="ui-table__th ui-table__th--actions" />
                   </tr>
@@ -2317,7 +2316,7 @@ export default function Index() {
                 <tbody className="ui-table__tbody">
                   {(() => {
                     if (sortedEntries.length === 0) return (
-                      <tr><td colSpan={4 + (!(showCodeBlock || showCABlock || showLimitationBlock) ? 3 : 0) + (showCodeBlock ? 5 : 0) + (showCABlock ? 6 : 0) + (showLimitationBlock ? 5 : 0)} className="ui-table__td ui-table__td--empty">Aucun partenaire trouvé</td></tr>
+                      <tr><td colSpan={4 + (!(showCodeBlock || showCABlock || showLimitationBlock) ? 3 : 0) + (showCodeBlock ? 5 : 0) + (showCABlock ? 6 : 0) + (showLimitationBlock ? 4 : 0)} className="ui-table__td ui-table__td--empty">Aucun partenaire trouvé</td></tr>
                     );
                     return paginatedEntries.map((entry) => {
                       const isSelected = selectedIds.has(entry.id);
@@ -2478,35 +2477,6 @@ export default function Index() {
                               </td>
                               <td className="ui-table__td ui-table__td--center" style={{ backgroundColor: "#fffbeb", fontSize: "12px", color: isBlocked ? "#991b1b" : "#555", fontWeight: isBlocked ? 600 : 400 }}>
                                 {unlockDate ? fmtDate(unlockDate) : "—"}
-                              </td>
-                              <td className="ui-table__td ui-table__td--center" style={{ backgroundColor: "#fffbeb" }}>
-                                {!isLocked ? (
-                                  <select
-                                    value={remType}
-                                    disabled={isLocked}
-                                    style={{ fontSize: "11px", padding: "2px 4px", border: "1px solid #d1d5db", borderRadius: "4px", backgroundColor: "white", cursor: "pointer" }}
-                                    onChange={(e) => {
-                                      const newVal = e.target.value;
-                                      if (newVal === remType) return;
-                                      const isFromBlockedLimite = remType === "limite_annee" && isBlocked && newVal === "illimite";
-                                      if (isFromBlockedLimite) {
-                                        const cfg = (window as any).__shopConfig__;
-                                        const threshold = cfg?.threshold ?? 500;
-                                        const remainder = parseFloat((entry as any).cache_ca_remainder || "0");
-                                        const missed = Math.floor(remainder / threshold);
-                                        if (missed > 0) {
-                                          const ok = confirm(`Cette pro est actuellement bloquée et a dépassé le palier ${missed} fois pendant son blocage.\n\nEn passant en Illimité, ${missed} crédit(s) de ${cfg?.creditAmount ?? "?"} € seront émis immédiatement.\n\nConfirmer ?`);
-                                          if (!ok) { e.target.value = remType; return; }
-                                        }
-                                      }
-                                      submit({ action: "update_limitation", id: entry.id, remuneration_type: newVal }, { method: "post" });
-                                    }}
-                                  >
-                                    <option value="illimite">Illimité</option>
-                                    <option value="limite_annee">Limité (annuel)</option>
-                                    <option value="sans_remuneration">Aucune rémun.</option>
-                                  </select>
-                                ) : <span style={{ color: "#9ca3af", fontSize: "12px" }}>—</span>}
                               </td>
                             </>);
                           })()}
