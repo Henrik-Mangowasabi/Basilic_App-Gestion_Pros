@@ -2196,32 +2196,6 @@ export default function Index() {
             {/* Header */}
             <div className="table-card__header">
               <span className="table-card__title">Liste des Partenaires ({entries.length})</span>
-              {showLimitationBlock && (
-                <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                  <select
-                    value={limitationFilter.statut}
-                    onChange={(e) => { setLimitationFilter(f => ({ ...f, statut: e.target.value })); }}
-                    style={{ fontSize: "12px", padding: "4px 8px", border: "1px solid #fde68a", borderRadius: "6px", backgroundColor: "rgb(255, 251, 235)", color: "#92400e", cursor: "pointer" }}
-                  >
-                    <option value="all">Tous les statuts</option>
-                    <option value="illimite">Illimité</option>
-                    <option value="limite_annee">Limité (annuel)</option>
-                    <option value="sans_remuneration">Aucune rémunération</option>
-                  </select>
-                  <select
-                    value={limitationFilter.bloque}
-                    onChange={(e) => { setLimitationFilter(f => ({ ...f, bloque: e.target.value })); }}
-                    style={{ fontSize: "12px", padding: "4px 8px", border: "1px solid #fde68a", borderRadius: "6px", backgroundColor: "rgb(255, 251, 235)", color: "#92400e", cursor: "pointer" }}
-                  >
-                    <option value="all">Bloqué : tous</option>
-                    <option value="oui">Bloqué : Oui</option>
-                    <option value="non">Bloqué : Non</option>
-                  </select>
-                  {(limitationFilter.statut !== "all" || limitationFilter.bloque !== "all") && (
-                    <button type="button" onClick={() => setLimitationFilter({ statut: "all", bloque: "all" })} style={{ fontSize: "11px", padding: "3px 8px", border: "1px solid #fde68a", borderRadius: "6px", backgroundColor: "transparent", color: "#92400e", cursor: "pointer" }}>✕ Réinitialiser</button>
-                  )}
-                </div>
-              )}
               <div className="table-header-actions">
                 {showCABlock && (
                   <button

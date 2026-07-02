@@ -5817,7 +5817,7 @@ font-size: 12px;
 
 .bsl-modal__limitation .bsl-modal__label { color: #92400e; }
 
-.mf-th--dev--amber {
+.ui-table__th.mf-th--dev--amber {
     background-color: rgb(255, 251, 235);
     color: #92400e;
     border-bottom: 2px solid #fde68a;
