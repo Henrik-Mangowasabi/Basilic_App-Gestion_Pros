@@ -458,6 +458,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const adresse = cleanInput(
           String(keys.adresse || keys.address || keys.ville || ""),
         );
+        const remuRaw = String(keys["statut remuneration"] || keys["statut rémunération"] || keys.remuneration || keys.rémunération || keys.remuneration_type || "").toLowerCase().trim();
+        const remuneration_type = remuRaw.includes("sans") || remuRaw.includes("aucune") ? "sans_remuneration"
+          : remuRaw.includes("limit") || remuRaw.includes("annuel") ? "limite_annee"
+          : "illimite";
 
         // Vérif données minimales — si pas de ref, on en génère une automatiquement
         if (!ref) {
@@ -504,6 +508,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           type,
           profession,
           adresse,
+          remuneration_type,
         });
 
         if (result.success) {
@@ -1740,7 +1745,11 @@ function exportToExcel(entries: Array<{
   cache_credit_earned?: string;
   cache_ca_remainder?: string;
   credit_balance?: number;
+  remuneration_type?: string;
+  limitation_date?: string;
+  limitation_unlock_date?: string;
 }>, threshold: number) {
+  const remuLabels: Record<string, string> = { illimite: "Illimité", limite_annee: "Limité (annuel)", sans_remuneration: "Aucune rémunération" };
   const exportData = entries.map((entry) => {
     let firstName = "";
     let lastName = "";
@@ -1760,6 +1769,11 @@ function exportToExcel(entries: Array<{
     const caRemainder = parseFloat(entry.cache_ca_remainder || "0");
     const prochainPalier = Math.max(0, threshold - caRemainder);
 
+    const remType = entry.remuneration_type || "illimite";
+    const unlockDate = entry.limitation_unlock_date || "";
+    const isBlocked = remType === "limite_annee" && !!unlockDate && new Date(unlockDate) > new Date();
+    const fmtDate = (d: string) => d ? new Date(d).toLocaleDateString("fr-FR") : "";
+
     return {
       "Prénom": firstName,
       "Nom": lastName,
@@ -1775,6 +1789,10 @@ function exportToExcel(entries: Array<{
       "Crédits Utilisés (€)": parseFloat(used.toFixed(2)),
       "Crédits Restants (€)": creditBalance,
       "Prochain Palier (€)": parseFloat(prochainPalier.toFixed(2)),
+      "Statut Rémunération": remuLabels[remType] || remType,
+      "Bloqué": remType === "limite_annee" ? (isBlocked ? "Oui" : "Non") : "",
+      "Bloqué le": fmtDate(entry.limitation_date || ""),
+      "Déblocage le": fmtDate(unlockDate),
     };
   });
 
@@ -1796,6 +1814,10 @@ function exportToExcel(entries: Array<{
     { wch: 18 }, // Crédits Utilisés
     { wch: 18 }, // Crédits Restants
     { wch: 18 }, // Prochain Palier
+    { wch: 22 }, // Statut Rémunération
+    { wch: 10 }, // Bloqué
+    { wch: 14 }, // Bloqué le
+    { wch: 14 }, // Déblocage le
   ];
 
   XLSX.utils.book_append_sheet(wb, ws, "Partenaires");
