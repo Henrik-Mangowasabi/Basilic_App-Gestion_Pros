@@ -256,24 +256,54 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       let previousCreditEarned = 0;
       let currentCount = 0;
       let currentRemainder = 0;
+      let remunerationType = "illimite";
+      let limitationUnlockDate = "";
 
       metaobjectNode.fields.forEach((f: any) => {
         if (f.key === "cache_revenue" && f.value) currentRevenue = parseFloat(f.value);
         if (f.key === "cache_credit_earned" && f.value) previousCreditEarned = parseFloat(f.value);
         if (f.key === "cache_orders_count" && f.value) currentCount = parseInt(f.value);
         if (f.key === "cache_ca_remainder" && f.value) currentRemainder = parseFloat(f.value);
+        if (f.key === "remuneration_type" && f.value) remunerationType = f.value;
+        if (f.key === "limitation_unlock_date" && f.value) limitationUnlockDate = f.value;
       });
 
-      // 2. Logique incrémentale par paliers
+      // 2. Logique incrémentale par paliers selon le type de rémunération
       const newRevenue = currentRevenue + orderAmount;
       const newCount = currentCount + 1;
 
-      // Calculer les paliers potentiels
       let potentialRemainder = currentRemainder + orderAmount;
       let creditsToAdd = 0;
-      while (potentialRemainder >= config.threshold) {
-        creditsToAdd += config.creditAmount;
-        potentialRemainder -= config.threshold;
+      let newLimitationDate: string | null = null;
+      let newLimitationUnlockDate: string | null = null;
+
+      if (remunerationType === "sans_remuneration") {
+        // Jamais de crédit — on accumule uniquement le CA pour les stats
+        creditsToAdd = 0;
+      } else if (remunerationType === "limite_annee") {
+        const isBlocked = !!limitationUnlockDate && new Date(limitationUnlockDate) > new Date();
+        if (isBlocked) {
+          // Bloqué : on accumule le CA mais aucun crédit
+          creditsToAdd = 0;
+        } else {
+          // Non bloqué : 1 seul crédit max si le palier est franchi
+          if (potentialRemainder >= config.threshold) {
+            creditsToAdd = config.creditAmount;
+            potentialRemainder -= config.threshold; // soustraction unique
+            // Préparer les dates de blocage (seront appliquées si le crédit réussit)
+            const now = new Date();
+            const unlock = new Date(now);
+            unlock.setFullYear(unlock.getFullYear() + 1);
+            newLimitationDate = now.toISOString().split("T")[0];
+            newLimitationUnlockDate = unlock.toISOString().split("T")[0];
+          }
+        }
+      } else {
+        // illimite : comportement actuel (N crédits possibles)
+        while (potentialRemainder >= config.threshold) {
+          creditsToAdd += config.creditAmount;
+          potentialRemainder -= config.threshold;
+        }
       }
 
       // 3. Virement du crédit (si palier franchi)
@@ -352,7 +382,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               { key: "cache_revenue", value: String(newRevenue) },
               { key: "cache_orders_count", value: String(newCount) },
               { key: "cache_credit_earned", value: String(newCreditEarned) },
-              { key: "cache_ca_remainder", value: String(finalRemainder) }
+              { key: "cache_ca_remainder", value: String(finalRemainder) },
+              ...(actualCreditsDeposited > 0 && newLimitationDate
+                ? [
+                    { key: "limitation_date", value: newLimitationDate },
+                    { key: "limitation_unlock_date", value: newLimitationUnlockDate! },
+                  ]
+                : []),
             ]
           }
         }

@@ -12,6 +12,7 @@ import {
   updateCustomerInShopify,
   updateCustomerProMetafields,
   deleteCustomerCodePromo,
+  syncRemunerationTag,
 } from "./customer.server";
 
 const METAOBJECT_TYPE = "mm_pro_de_sante";
@@ -100,6 +101,15 @@ export async function migrateMetaobjectDefinition(admin: AdminApiContext) {
     }
     if (!existingKeys.includes("cache_ca_remainder")) {
       toAdd.push({ name: "Cache CA Remainder", key: "cache_ca_remainder", type: "number_decimal", required: false });
+    }
+    if (!existingKeys.includes("remuneration_type")) {
+      toAdd.push({ name: "Remuneration Type", key: "remuneration_type", type: "single_line_text_field", required: false });
+    }
+    if (!existingKeys.includes("limitation_date")) {
+      toAdd.push({ name: "Limitation Date", key: "limitation_date", type: "single_line_text_field", required: false });
+    }
+    if (!existingKeys.includes("limitation_unlock_date")) {
+      toAdd.push({ name: "Limitation Unlock Date", key: "limitation_unlock_date", type: "single_line_text_field", required: false });
     }
 
     const fieldDefinitionsOps = toAdd.map(f => ({
@@ -236,6 +246,25 @@ export async function createMetaobject(admin: AdminApiContext) {
       name: "Cache CA Remainder",
       key: "cache_ca_remainder",
       type: "number_decimal",
+      required: false,
+    },
+    // --- LIMITATION RÉGLEMENTAIRE ---
+    {
+      name: "Remuneration Type",
+      key: "remuneration_type",
+      type: "single_line_text_field",
+      required: false,
+    },
+    {
+      name: "Limitation Date",
+      key: "limitation_date",
+      type: "single_line_text_field",
+      required: false,
+    },
+    {
+      name: "Limitation Unlock Date",
+      key: "limitation_unlock_date",
+      type: "single_line_text_field",
       required: false,
     },
   ];
@@ -414,6 +443,9 @@ export async function createMetaobjectEntry(
       { key: "cache_orders_count", value: "0" },
       { key: "cache_credit_earned", value: "0" },
       { key: "cache_ca_remainder", value: "0" },
+      { key: "remuneration_type", value: String(fields.remuneration_type || "illimite") },
+      { key: "limitation_date", value: "" },
+      { key: "limitation_unlock_date", value: "" },
     ];
 
     const mutation = `mutation metaobjectCreate($metaobject: MetaobjectCreateInput!) {
@@ -456,6 +488,13 @@ export async function createMetaobjectEntry(
         });
       } catch (mfErr) {
         console.warn("⚠️ [CLIENT] Metafields non mis à jour (non-bloquant):", mfErr);
+      }
+
+      // Tag de rémunération (non-bloquant)
+      try {
+        await syncRemunerationTag(admin, customerIdToSave, fields.remuneration_type || "illimite");
+      } catch (tagErr) {
+        console.warn("⚠️ [CLIENT] Tag rémunération non mis à jour (non-bloquant):", tagErr);
       }
     }
 
@@ -637,6 +676,16 @@ export async function updateMetaobjectEntry(
     fieldsInput.push({ key: "adresse", value: String(fields.adresse) });
   if (newDiscountId)
     fieldsInput.push({ key: "discount_id", value: newDiscountId });
+  if (fields.remuneration_type !== undefined)
+    fieldsInput.push({ key: "remuneration_type", value: String(fields.remuneration_type) });
+  if (fields.limitation_date !== undefined)
+    fieldsInput.push({ key: "limitation_date", value: String(fields.limitation_date || "") });
+  if (fields.limitation_unlock_date !== undefined)
+    fieldsInput.push({ key: "limitation_unlock_date", value: String(fields.limitation_unlock_date || "") });
+  if (fields.cache_ca_remainder !== undefined)
+    fieldsInput.push({ key: "cache_ca_remainder", value: String(fields.cache_ca_remainder) });
+  if (fields.cache_credit_earned !== undefined)
+    fieldsInput.push({ key: "cache_credit_earned", value: String(fields.cache_credit_earned) });
 
   const mutation = `mutation metaobjectUpdate($id: ID!, $metaobject: MetaobjectUpdateInput!) { metaobjectUpdate(id: $id, metaobject: $metaobject) { userErrors { field message } } }`;
 
@@ -682,6 +731,15 @@ export async function updateMetaobjectEntry(
         });
       } catch (mfErr) {
         console.warn("⚠️ [CLIENT] Metafields non mis à jour (non-bloquant):", mfErr);
+      }
+
+      // Sync tag rémunération si le type a changé
+      if (fields.remuneration_type !== undefined && fields.remuneration_type !== oldData.remuneration_type) {
+        try {
+          await syncRemunerationTag(admin, oldData.customer_id, fields.remuneration_type);
+        } catch (tagErr) {
+          console.warn("⚠️ [CLIENT] Tag rémunération non mis à jour (non-bloquant):", tagErr);
+        }
       }
     }
 
