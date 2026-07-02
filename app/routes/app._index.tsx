@@ -254,8 +254,47 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const type = (formData.get("type") as string)?.trim() || "";
     const profession = (formData.get("profession") as string)?.trim() || "";
     const adresse = (formData.get("adresse") as string)?.trim() || "";
+    const newRemuType = (formData.get("remuneration_type") as string)?.trim() || "";
 
     if (!id) return { error: "ID manquant" };
+
+    // Logique limitation : fetch état actuel pour détecter changement + crédits immédiats
+    const extraLimitationFields: Record<string, string> = {};
+    if (newRemuType) {
+      const rEntry = await admin.graphql(`query($id: ID!) { metaobject(id: $id) { fields { key value } } }`, { variables: { id } });
+      const dEntry = (await rEntry.json()) as any;
+      const currentData: Record<string, string> = {};
+      (dEntry.data?.metaobject?.fields || []).forEach((f: any) => { currentData[f.key] = f.value || ""; });
+
+      const currentType = currentData.remuneration_type || "illimite";
+      const moCustomerId = currentData.customer_id || "";
+      const lockDate = currentData.limitation_unlock_date || "";
+      const isBlocked = currentType === "limite_annee" && !!lockDate && new Date(lockDate) > new Date();
+
+      if (newRemuType === "illimite" && isBlocked) {
+        const cfg = await getShopConfig(admin);
+        const remainder = parseFloat(currentData.cache_ca_remainder || "0");
+        const creditEarned = parseFloat(currentData.cache_credit_earned || "0");
+        const missed = Math.floor(remainder / cfg.threshold);
+        const totalCredits = missed * cfg.creditAmount;
+        if (missed > 0 && moCustomerId) {
+          try {
+            const rAcc = await admin.graphql(`query($id: ID!) { customer(id: $id) { storeCreditAccounts(first: 1) { edges { node { id } } } } }`, { variables: { id: moCustomerId } });
+            const dAcc = (await rAcc.json()) as any;
+            const accountId = dAcc.data?.customer?.storeCreditAccounts?.edges?.[0]?.node?.id;
+            await admin.graphql(`mutation creditStore($id: ID!, $creditInput: StoreCreditAccountCreditInput!) { storeCreditAccountCredit(id: $id, creditInput: $creditInput) { userErrors { field message } } }`, {
+              variables: { id: accountId || moCustomerId, creditInput: { creditAmount: { amount: String(totalCredits), currencyCode: "EUR" } } },
+            });
+          } catch (e) { console.error("[LIMITATION] Erreur store credit immédiat:", e); }
+        }
+        extraLimitationFields.cache_ca_remainder = String(remainder % (cfg.threshold || 500));
+        extraLimitationFields.cache_credit_earned = String(creditEarned + totalCredits);
+      }
+      if (newRemuType !== "limite_annee" || currentType !== "limite_annee") {
+        extraLimitationFields.limitation_date = "";
+        extraLimitationFields.limitation_unlock_date = "";
+      }
+    }
 
     console.log(`[AUDIT][EDIT][UPDATE] ${new Date().toISOString()} | id=${id} | code=${code} | nom="${first_name} ${last_name}" | email=${email}`);
     const result = await updateMetaobjectEntry(admin, id, {
@@ -268,6 +307,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       type,
       profession,
       adresse,
+      ...(newRemuType ? { remuneration_type: newRemuType } : {}),
+      ...extraLimitationFields,
     });
     console.log(`[AUDIT][EDIT][UPDATE] résultat: ${result.success ? "OK" : `ERREUR: ${result.error}`}`);
 
@@ -1595,8 +1636,8 @@ function PartnerModal({ mode, entry, onClose, entries }: { mode: "create" | "edi
           </div>
 
           {/* SECTION LIMITATION */}
-          <div style={{ marginTop: "16px", padding: "12px 16px", backgroundColor: "#fffbeb", borderRadius: "8px", border: "1px solid #fde68a" }}>
-            <div style={{ fontSize: "12px", fontWeight: 600, color: "#92400e", marginBottom: "10px", display: "flex", alignItems: "center", gap: "6px" }}>
+          <div className="bsl-modal__limitation">
+            <div className="bsl-modal__limitation__title">
               <svg width="13" height="13" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" /></svg>
               Limitation réglementaire
             </div>
@@ -1608,42 +1649,28 @@ function PartnerModal({ mode, entry, onClose, entries }: { mode: "create" | "edi
               const typeLabels: Record<string, string> = { illimite: "Illimité", limite_annee: "Limité (annuel)", sans_remuneration: "Aucune rémunération" };
               const fmtDate = (d: string) => d ? new Date(d).toLocaleDateString("fr-FR") : "—";
               return (
-                <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                  <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", fontSize: "12px", color: "#555" }}>
-                    <span>Statut actuel : <strong style={{ color: remType === "sans_remuneration" ? "#991b1b" : remType === "limite_annee" ? "#92400e" : "#065f46" }}>{typeLabels[remType]}</strong></span>
-                    {remType === "limite_annee" && <span>Bloqué : <strong style={{ color: isBlocked ? "#991b1b" : "#065f46" }}>{isBlocked ? "Oui" : "Non"}</strong></span>}
+                <div className="bsl-modal__limitation__body">
+                  <div className="bsl-modal__limitation__meta">
+                    <span>Statut actuel : <strong className={remType === "sans_remuneration" ? "bsl-modal__limitation__status--sans" : remType === "limite_annee" ? "bsl-modal__limitation__status--limite" : "bsl-modal__limitation__status--illimite"}>{typeLabels[remType]}</strong></span>
+                    {remType === "limite_annee" && <span>Bloqué : <strong className={isBlocked ? "bsl-modal__limitation__blocked--yes" : "bsl-modal__limitation__blocked--no"}>{isBlocked ? "Oui" : "Non"}</strong></span>}
                     {limDate && <span>Bloqué le : <strong>{fmtDate(limDate)}</strong></span>}
-                    {unlockDate && <span>Déblocage : <strong style={{ color: isBlocked ? "#991b1b" : "#555" }}>{fmtDate(unlockDate)}</strong></span>}
+                    {unlockDate && <span>Déblocage : <strong className={isBlocked ? "bsl-modal__limitation__date--danger" : ""}>{fmtDate(unlockDate)}</strong></span>}
                   </div>
-                  <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-                    <select
-                      value={fd.remuneration_type}
-                      onChange={(e) => setFd({ ...fd, remuneration_type: e.target.value })}
-                      disabled={isBusy}
-                      style={{ fontSize: "12px", padding: "4px 8px", border: "1px solid #d1d5db", borderRadius: "6px", backgroundColor: "white" }}
-                    >
-                      <option value="illimite">Illimité</option>
-                      <option value="limite_annee">Limité (annuel)</option>
-                      <option value="sans_remuneration">Aucune rémunération</option>
-                    </select>
-                    {fd.remuneration_type !== remType && (
-                      <button
-                        type="button"
-                        disabled={isBusy}
-                        onClick={() => {
-                          submitFn({ action: "update_limitation", id: entry.id, remuneration_type: fd.remuneration_type }, { method: "post" });
-                        }}
-                        style={{ fontSize: "12px", padding: "4px 10px", backgroundColor: "#92400e", color: "white", border: "none", borderRadius: "6px", cursor: "pointer" }}
-                      >
-                        Appliquer
-                      </button>
-                    )}
-                  </div>
+                  <select
+                    className="bsl-modal__input bsl-modal__select"
+                    value={fd.remuneration_type}
+                    onChange={(e) => setFd({ ...fd, remuneration_type: e.target.value })}
+                    disabled={isBusy}
+                  >
+                    <option value="illimite">Illimité</option>
+                    <option value="limite_annee">Limité (annuel)</option>
+                    <option value="sans_remuneration">Aucune rémunération</option>
+                  </select>
                 </div>
               );
             })() : (
               <div>
-                <label className="bsl-modal__label" style={{ fontSize: "12px" }}>Type de rémunération</label>
+                <label className="bsl-modal__label">Type de rémunération</label>
                 <select
                   className="bsl-modal__input bsl-modal__select"
                   value={fd.remuneration_type}
@@ -1796,6 +1823,7 @@ export default function Index() {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [sortConfig, setSortConfig] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
+  const [limitationFilter, setLimitationFilter] = useState<{ statut: string; bloque: string }>({ statut: "all", bloque: "all" });
   const { showCodeBlock, setShowCodeBlock, showCABlock, setShowCABlock, showLimitationBlock, setShowLimitationBlock, isLocked, showToast, setConfig, setValidationDefaults } = useEditMode();
 
   // Synchroniser le config serveur vers le context client (au chargement de la page)
@@ -1830,8 +1858,20 @@ export default function Index() {
 
   const filteredEntries = useMemo(() => entries.filter(e => {
     const q = searchQuery.toLowerCase();
-    return !q || [e.first_name, e.last_name, e.name, e.email, e.code, (e as { profession?: string }).profession].some(v => v && String(v).toLowerCase().includes(q));
-  }), [entries, searchQuery]);
+    const matchesSearch = !q || [e.first_name, e.last_name, e.name, e.email, e.code, (e as any).profession].some(v => v && String(v).toLowerCase().includes(q));
+    if (!matchesSearch) return false;
+    if (showLimitationBlock) {
+      if (limitationFilter.statut !== "all" && ((e as any).remuneration_type || "illimite") !== limitationFilter.statut) return false;
+      if (limitationFilter.bloque !== "all") {
+        const unlockDate = (e as any).limitation_unlock_date || "";
+        const remType = (e as any).remuneration_type || "illimite";
+        const isBlocked = remType === "limite_annee" && !!unlockDate && new Date(unlockDate) > new Date();
+        if (limitationFilter.bloque === "oui" && !isBlocked) return false;
+        if (limitationFilter.bloque === "non" && isBlocked) return false;
+      }
+    }
+    return true;
+  }), [entries, searchQuery, showLimitationBlock, limitationFilter]);
 
   const sortedEntries = useMemo(() => sortConfig ? [...filteredEntries].sort((a, b) => {
     const dir = sortConfig.dir === "asc" ? 1 : -1;
@@ -1867,6 +1907,19 @@ export default function Index() {
         const rb2 = Math.max(0, threshold - parseFloat((b as any).cache_ca_remainder || "0")); // eslint-disable-line @typescript-eslint/no-explicit-any
         return dir * (ra2 - rb2);
       }
+      case "remuneration_type": {
+        const order: Record<string, number> = { illimite: 0, limite_annee: 1, sans_remuneration: 2 };
+        return dir * ((order[(a as any).remuneration_type || "illimite"] ?? 0) - (order[(b as any).remuneration_type || "illimite"] ?? 0));
+      }
+      case "bloque": {
+        const isBlockedA = (a as any).remuneration_type === "limite_annee" && !!(a as any).limitation_unlock_date && new Date((a as any).limitation_unlock_date) > new Date() ? 1 : 0;
+        const isBlockedB = (b as any).remuneration_type === "limite_annee" && !!(b as any).limitation_unlock_date && new Date((b as any).limitation_unlock_date) > new Date() ? 1 : 0;
+        return dir * (isBlockedA - isBlockedB);
+      }
+      case "limitation_date":
+        return dir * ((a as any).limitation_date || "").localeCompare((b as any).limitation_date || "");
+      case "limitation_unlock_date":
+        return dir * ((a as any).limitation_unlock_date || "").localeCompare((b as any).limitation_unlock_date || "");
       default: return 0;
     }
   }) : filteredEntries, [filteredEntries, sortConfig]);
@@ -2143,6 +2196,32 @@ export default function Index() {
             {/* Header */}
             <div className="table-card__header">
               <span className="table-card__title">Liste des Partenaires ({entries.length})</span>
+              {showLimitationBlock && (
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                  <select
+                    value={limitationFilter.statut}
+                    onChange={(e) => { setLimitationFilter(f => ({ ...f, statut: e.target.value })); }}
+                    style={{ fontSize: "12px", padding: "4px 8px", border: "1px solid #fde68a", borderRadius: "6px", backgroundColor: "rgb(255, 251, 235)", color: "#92400e", cursor: "pointer" }}
+                  >
+                    <option value="all">Tous les statuts</option>
+                    <option value="illimite">Illimité</option>
+                    <option value="limite_annee">Limité (annuel)</option>
+                    <option value="sans_remuneration">Aucune rémunération</option>
+                  </select>
+                  <select
+                    value={limitationFilter.bloque}
+                    onChange={(e) => { setLimitationFilter(f => ({ ...f, bloque: e.target.value })); }}
+                    style={{ fontSize: "12px", padding: "4px 8px", border: "1px solid #fde68a", borderRadius: "6px", backgroundColor: "rgb(255, 251, 235)", color: "#92400e", cursor: "pointer" }}
+                  >
+                    <option value="all">Bloqué : tous</option>
+                    <option value="oui">Bloqué : Oui</option>
+                    <option value="non">Bloqué : Non</option>
+                  </select>
+                  {(limitationFilter.statut !== "all" || limitationFilter.bloque !== "all") && (
+                    <button type="button" onClick={() => setLimitationFilter({ statut: "all", bloque: "all" })} style={{ fontSize: "11px", padding: "3px 8px", border: "1px solid #fde68a", borderRadius: "6px", backgroundColor: "transparent", color: "#92400e", cursor: "pointer" }}>✕ Réinitialiser</button>
+                  )}
+                </div>
+              )}
               <div className="table-header-actions">
                 {showCABlock && (
                   <button
@@ -2193,7 +2272,7 @@ export default function Index() {
             <div ref={tableBlockRef} className={`table-block${(showCodeBlock || showCABlock || showLimitationBlock) ? " table-block--padded" : ""}`}>
               {showCodeBlock && badgeLeft !== null && <div className="block-badge block-badge--green" style={{ left: `${badgeLeft.code}px` }}><svg width="10" height="10" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M12.316 3.051a1 1 0 01.633 1.265l-4 12a1 1 0 11-1.898-.632l4-12a1 1 0 011.265-.633zM5.707 6.293a1 1 0 010 1.414L3.414 10l2.293 2.293a1 1 0 11-1.414 1.414l-3-3a1 1 0 010-1.414l3-3a1 1 0 011.414 0zm8.586 0a1 1 0 011.414 0l3 3a1 1 0 010 1.414l-3 3a1 1 0 11-1.414-1.414L16.586 10l-2.293-2.293a1 1 0 010-1.414z" clipRule="evenodd" /></svg> Code Promo</div>}
               {showCABlock && badgeLeft !== null && <div className="block-badge block-badge--blue" style={{ left: `${badgeLeft.ca}px` }}><svg width="10" height="10" viewBox="0 0 20 20" fill="currentColor"><path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zm6-4a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zm6-3a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z" /></svg> Chiffre d&apos;Affaires</div>}
-              {showLimitationBlock && badgeLeft !== null && <div className="block-badge" style={{ left: `${badgeLeft.limitation}px`, backgroundColor: "#fff3cd", color: "#856404", border: "1px solid #ffc107" }}><svg width="10" height="10" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" /></svg> Limitation</div>}
+              {showLimitationBlock && badgeLeft !== null && <div className="block-badge" style={{ left: `${badgeLeft.limitation}px`, backgroundColor: "rgb(255, 251, 235)", color: "#92400e" }}><svg width="10" height="10" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" /></svg> Limitation</div>}
               <div ref={tableScrollRef} className="table-scroll">
               <table className="ui-table" style={{ tableLayout: "fixed", width: "100%", minWidth: `${(showCodeBlock || showCABlock || showLimitationBlock ? 272 : 532) + (showCodeBlock ? 550 : 0) + (showCABlock ? 550 : 0) + (showLimitationBlock ? 600 : 0)}px` }}>
                 <colgroup>
@@ -2252,11 +2331,11 @@ export default function Index() {
                       </th>
                     </>)}
                     {showLimitationBlock && (<>
-                      <th ref={limitationThRef} className="ui-table__th ui-table__th--block-start ui-table__th--center" style={{ backgroundColor: "#fffbeb", color: "#92400e", borderBottom: "2px solid #fde68a" }}>Statut</th>
-                      <th className="ui-table__th ui-table__th--center" style={{ backgroundColor: "#fffbeb", color: "#92400e", borderBottom: "2px solid #fde68a" }}>Bloqué</th>
-                      <th className="ui-table__th ui-table__th--center" style={{ backgroundColor: "#fffbeb", color: "#92400e", borderBottom: "2px solid #fde68a" }}>Bloqué le</th>
-                      <th className="ui-table__th ui-table__th--center" style={{ backgroundColor: "#fffbeb", color: "#92400e", borderBottom: "2px solid #fde68a" }}>Déblocage le</th>
-                      <th className="ui-table__th ui-table__th--center" style={{ backgroundColor: "#fffbeb", color: "#92400e", borderBottom: "2px solid #fde68a" }}>Changer</th>
+                      <th ref={limitationThRef} className="ui-table__th mf-th--dev--amber ui-table__th--block-start ui-table__th--center ui-table__th--sortable" onClick={() => handleSort("remuneration_type")}>Statut <SortIcon active={sortConfig?.key === "remuneration_type"} dir={sortConfig?.key === "remuneration_type" ? sortConfig.dir : null} /></th>
+                      <th className="ui-table__th mf-th--dev--amber ui-table__th--center ui-table__th--sortable" onClick={() => handleSort("bloque")}>Bloqué <SortIcon active={sortConfig?.key === "bloque"} dir={sortConfig?.key === "bloque" ? sortConfig.dir : null} /></th>
+                      <th className="ui-table__th mf-th--dev--amber ui-table__th--center ui-table__th--sortable" onClick={() => handleSort("limitation_date")}>Bloqué le <SortIcon active={sortConfig?.key === "limitation_date"} dir={sortConfig?.key === "limitation_date" ? sortConfig.dir : null} /></th>
+                      <th className="ui-table__th mf-th--dev--amber ui-table__th--center ui-table__th--sortable" onClick={() => handleSort("limitation_unlock_date")}>Déblocage le <SortIcon active={sortConfig?.key === "limitation_unlock_date"} dir={sortConfig?.key === "limitation_unlock_date" ? sortConfig.dir : null} /></th>
+                      <th className="ui-table__th mf-th--dev--amber ui-table__th--center">Changer</th>
                     </>)}
                     <th className="ui-table__th ui-table__th--actions" />
                   </tr>
