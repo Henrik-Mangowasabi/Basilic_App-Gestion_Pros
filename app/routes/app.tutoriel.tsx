@@ -368,6 +368,10 @@ export default function TutorielPage() {
             </div>
             <div className="tuto-nav-item">
               <span className="tuto-nav-item__badge tuto-nav-item__badge--new">NEW</span>
+              <strong>Gestion Limitation</strong> — Vue dédiée au suivi du statut de rémunération réglementaire de chaque pro.
+            </div>
+            <div className="tuto-nav-item">
+              <span className="tuto-nav-item__badge tuto-nav-item__badge--new">NEW</span>
               <strong>Validation des Pros</strong> — Approuvez ou refusez les demandes de partenariat soumises par vos clients.
             </div>
             <div className="tuto-nav-item">
@@ -496,9 +500,10 @@ export default function TutorielPage() {
             <span className="tuto-col--required">Type *</span>
             <span className="tuto-col--optional">Profession</span>
             <span className="tuto-col--optional">Adresse</span>
+            <span className="tuto-col--optional">Statut Rémunération</span>
           </div>
           <p style={{ fontSize: "0.8rem", color: "var(--color-gray-500)", marginTop: "8px" }}>
-            <span style={{ color: "#d82c0d" }}>*</span> champs obligatoires
+            <span style={{ color: "#d82c0d" }}>*</span> champs obligatoires — <strong>Statut Rémunération</strong> : valeurs acceptées : <em>Illimité</em>, <em>Limité (annuel)</em>, <em>Aucune rémunération</em> (défaut : Illimité)
           </p>
 
           <h3 className="tuto-subsection">Comment importer</h3>
@@ -620,6 +625,125 @@ export default function TutorielPage() {
           <div className="tuto-info-box">
             💡 Utilisez la bascule <strong>Code Promo / Chiffre d&apos;affaires</strong> en haut de la page principale pour naviguer entre les deux vues sans changer de page.
           </div>
+        </div>
+
+        {/* ── SECTION 7b : LIMITATION RÉGLEMENTAIRE ── */}
+        <div className="tuto-section">
+          <h2 className="tuto-section__title">
+            <span className="tuto-section__icon">🔒</span>
+            Gestion des Limitations — Réglementation cadeaux
+          </h2>
+          <p className="tuto-section__desc">
+            La réglementation encadre les avantages accordés aux professionnels de santé (maximum <strong>60 € de cadeaux par an</strong>).
+            Chaque pro peut se voir attribuer un profil de rémunération différent, gérable depuis la fiche du partenaire ou via la vue <strong>Gestion Limitation</strong>.
+          </p>
+
+          <h3 className="tuto-subsection">Les 3 profils de rémunération</h3>
+          <div className="tuto-feature-list">
+            <div className="tuto-feature">
+              <span className="tuto-feature__icon">🟢</span>
+              <div>
+                <strong>Illimité</strong> — Comportement par défaut. Le pro accumule des crédits normalement à chaque fois que le seuil de CA est atteint.
+                Plusieurs crédits peuvent être émis sur une même commande si le seuil est franchi plusieurs fois.
+              </div>
+            </div>
+            <div className="tuto-feature">
+              <span className="tuto-feature__icon">🟡</span>
+              <div>
+                <strong>Limité (annuel)</strong> — Maximum <strong>1 crédit par an glissant</strong>. Dès qu&apos;un crédit est émis,
+                le pro est <em>bloqué</em> pour 12 mois : son CA continue de s&apos;accumuler normalement mais aucun nouveau crédit n&apos;est versé
+                pendant cette période. Au bout d&apos;un an, le premier dépassement du seuil débloque automatiquement un nouveau crédit.
+              </div>
+            </div>
+            <div className="tuto-feature">
+              <span className="tuto-feature__icon">🔴</span>
+              <div>
+                <strong>Aucune rémunération</strong> — Aucun crédit n&apos;est jamais émis pour ce pro, quelles que soient ses ventes.
+                Le CA continue d&apos;être comptabilisé mais aucun avantage financier n&apos;est accordé.
+              </div>
+            </div>
+          </div>
+
+          <h3 className="tuto-subsection">Fonctionnement automatique du blocage (Limité annuel)</h3>
+          <div className="tuto-steps">
+            <div className="tuto-step">
+              <div className="tuto-step__num">1</div>
+              <div>Le pro génère suffisamment de CA pour franchir le seuil → <strong>1 crédit est émis</strong> automatiquement.</div>
+            </div>
+            <div className="tuto-step">
+              <div className="tuto-step__num">2</div>
+              <div>L&apos;app enregistre la <strong>date de blocage</strong> (aujourd&apos;hui) et la <strong>date de déblocage</strong> (dans exactement 12 mois).</div>
+            </div>
+            <div className="tuto-step">
+              <div className="tuto-step__num">3</div>
+              <div>Pendant les 12 mois, toutes les commandes <strong>accumulent le CA normalement</strong> mais <strong>aucun crédit n&apos;est versé</strong>.</div>
+            </div>
+            <div className="tuto-step">
+              <div className="tuto-step__num">4</div>
+              <div>À la première commande <em>après</em> la date de déblocage, si le seuil est dépassé → <strong>nouveau crédit émis</strong> + <strong>nouveau cycle de 12 mois</strong> démarre.</div>
+            </div>
+          </div>
+          <div className="tuto-info-box">
+            💡 <strong>Entièrement automatique :</strong> Le déblocage ne nécessite aucune action manuelle. L&apos;app évalue la date à chaque nouvelle commande entrant via le webhook.
+          </div>
+
+          <h3 className="tuto-subsection">Changer le profil d&apos;un pro</h3>
+          <div className="tuto-steps">
+            <div className="tuto-step">
+              <div className="tuto-step__num">1</div>
+              <div>Cliquez sur <strong>...</strong> sur la ligne du pro, puis <strong>Modifier</strong>.</div>
+            </div>
+            <div className="tuto-step">
+              <div className="tuto-step__num">2</div>
+              <div>Dans la section <strong>Limitation réglementaire</strong> (fond jaune pâle en bas de la modale), sélectionnez le nouveau profil dans le menu déroulant.</div>
+            </div>
+            <div className="tuto-step">
+              <div className="tuto-step__num">3</div>
+              <div>Cliquez sur <strong>Sauvegarder</strong>. Le changement est appliqué immédiatement.</div>
+            </div>
+          </div>
+          <div className="tuto-info-box tuto-info-box--warning">
+            ⚠️ <strong>Cas spécial — Limité bloqué → Illimité :</strong> Si un pro est actuellement en période de blocage et que vous le passez en <em>Illimité</em>,
+            l&apos;app calcule automatiquement le nombre de crédits manqués pendant le blocage et les émet <strong>immédiatement</strong>.
+            La période de blocage est effacée et le pro repasse en cycle normal.
+          </div>
+
+          <h3 className="tuto-subsection">Vue Gestion Limitation</h3>
+          <div className="tuto-feature-list">
+            <div className="tuto-feature">
+              <span className="tuto-feature__icon">📋</span>
+              <div><strong>Statut</strong> — Affiche le profil de rémunération de chaque pro (Illimité / Limité (annuel) / Aucune rémunération).</div>
+            </div>
+            <div className="tuto-feature">
+              <span className="tuto-feature__icon">🔒</span>
+              <div><strong>Bloqué</strong> — Indique si le pro est actuellement en période de blocage (Oui / Non). S&apos;affiche uniquement pour les pros en mode Limité.</div>
+            </div>
+            <div className="tuto-feature">
+              <span className="tuto-feature__icon">📅</span>
+              <div><strong>Bloqué le</strong> — Date à laquelle le dernier crédit a été émis et le blocage a débuté.</div>
+            </div>
+            <div className="tuto-feature">
+              <span className="tuto-feature__icon">🗓️</span>
+              <div><strong>Déblocage le</strong> — Date à laquelle le pro pourra à nouveau recevoir un crédit (affiché en rouge si le blocage est actif).</div>
+            </div>
+            <div className="tuto-feature">
+              <span className="tuto-feature__icon">↕️</span>
+              <div><strong>Tri par colonne</strong> — Cliquez sur l&apos;en-tête de n&apos;importe quelle colonne pour trier les pros par statut, par blocage ou par date.</div>
+            </div>
+          </div>
+
+          <h3 className="tuto-subsection">Tags Shopify synchronisés</h3>
+          <p className="tuto-section__desc">
+            À chaque changement de profil, le tag correspondant est automatiquement mis à jour sur la fiche client Shopify du pro :
+          </p>
+          <div className="tuto-cols-simple">
+            <span className="tuto-col--optional">pro_illimite</span>
+            <span className="tuto-col--optional">pro_limite_annee</span>
+            <span className="tuto-col--optional">pro_sans_remuneration</span>
+          </div>
+          <p style={{ fontSize: "0.8rem", color: "var(--color-gray-500)", marginTop: "8px" }}>
+            Ces tags permettent d&apos;utiliser la segmentation Shopify (Klaviyo, emails, remises conditionnelles, etc.) selon le profil réglementaire.
+          </p>
         </div>
 
         {/* ── SECTION 8 : RÉGLAGES CRÉDITS ── */}
@@ -877,6 +1001,36 @@ export default function TutorielPage() {
               <div className="tuto-faq__answer">
                 Non. L&apos;email est verrouillé en mode édition car Shopify ne permet pas de modifier l&apos;adresse email d&apos;un compte client via l&apos;API.
                 Pour changer l&apos;email, rendez-vous directement sur la fiche du client dans l&apos;administration Shopify.
+              </div>
+            </details>
+            <details className="tuto-faq">
+              <summary className="tuto-faq__question">Que se passe-t-il si un pro bloqué (Limité) génère beaucoup de CA pendant son blocage ?</summary>
+              <div className="tuto-faq__answer">
+                Le CA s&apos;accumule normalement dans le compteur, mais aucun crédit n&apos;est émis pendant la période de blocage.
+                À la première commande après la date de déblocage, si le seuil est atteint, <strong>1 seul crédit</strong> est émis (et un nouveau cycle de 12 mois démarre).
+                Le CA accumulé en excès est conservé pour le prochain cycle — il n&apos;est pas perdu.
+              </div>
+            </details>
+            <details className="tuto-faq">
+              <summary className="tuto-faq__question">Le déblocage d&apos;un pro nécessite-t-il une action manuelle ?</summary>
+              <div className="tuto-faq__answer">
+                Non. Le déblocage est entièrement automatique. L&apos;application vérifie la date de déblocage à chaque commande entrant via webhook.
+                Dès que la date réelle dépasse la date de déblocage enregistrée, le pro est considéré comme débloqué pour la prochaine commande éligible.
+              </div>
+            </details>
+            <details className="tuto-faq">
+              <summary className="tuto-faq__question">Peut-on importer des pros avec un statut de rémunération spécifique ?</summary>
+              <div className="tuto-faq__answer">
+                Oui. Ajoutez une colonne <strong>Statut Rémunération</strong> dans votre fichier Excel avec les valeurs :
+                <em>Illimité</em>, <em>Limité (annuel)</em> ou <em>Aucune rémunération</em>. Si la colonne est absente ou vide, le statut <em>Illimité</em> est appliqué par défaut.
+              </div>
+            </details>
+            <details className="tuto-faq">
+              <summary className="tuto-faq__question">L&apos;export Excel contient-il les informations de limitation ?</summary>
+              <div className="tuto-faq__answer">
+                Oui. Le fichier exporté contient 4 colonnes dédiées : <strong>Statut Rémunération</strong>, <strong>Bloqué</strong> (Oui/Non),
+                <strong>Bloqué le</strong> (date du dernier crédit) et <strong>Déblocage le</strong> (date de fin de blocage).
+                Ces informations vous permettent d&apos;avoir une vue complète de la situation réglementaire de chaque pro.
               </div>
             </details>
           </div>

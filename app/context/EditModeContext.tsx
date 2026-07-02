@@ -18,6 +18,8 @@ type EditModeContextType = {
   setShowCodeBlock: (v: boolean) => void;
   showCABlock: boolean;
   setShowCABlock: (v: boolean) => void;
+  showLimitationBlock: boolean;
+  setShowLimitationBlock: (v: boolean) => void;
   config: { threshold: number; creditAmount: number };
   setConfig: (v: { threshold: number; creditAmount: number }) => void;
   validationDefaults: ValidationDefaults;
@@ -51,6 +53,7 @@ export function EditModeProvider({
   const [lockError, setLockError] = useState("");
   const [showCodeBlock, setShowCodeBlock] = useState(true);
   const [showCABlock, setShowCABlock] = useState(false);
+  const [showLimitationBlock, setShowLimitationBlock] = useState(false);
   const [config, setConfigState] = useState(initialConfig ?? { threshold: 500, creditAmount: 10 });
   const [validationDefaults, setValidationDefaultsState] = useState<ValidationDefaults>(initialValidationDefaults ?? { value: 5, type: "%", codePrefix: "PRO_" });
 
@@ -105,6 +108,8 @@ export function EditModeProvider({
         setShowCodeBlock,
         showCABlock,
         setShowCABlock,
+        showLimitationBlock,
+        setShowLimitationBlock,
         config,
         setConfig,
         validationDefaults,

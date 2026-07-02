@@ -189,6 +189,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const code = (formData.get("code") as string)?.trim() || "";
     const value = parseFloat(formData.get("value") as string);
     const type = (formData.get("type") as string)?.trim() || "%";
+    const remuneration_type = (formData.get("remuneration_type") as string)?.trim() || "illimite";
 
     const identification = `${(firstName.slice(0, 2) + lastName.slice(0, 2)).toUpperCase()}${Date.now().toString(36).slice(-4).toUpperCase()}`;
 
@@ -204,6 +205,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       profession,
       adresse,
       customer_id: customerId, // Passer directement le customer_id de la validation
+      remuneration_type,
     });
 
     if (!result.success) {
@@ -587,6 +589,7 @@ function AcceptModal({
   const [code, setCode] = useState(autoCode);
   const [value, setValue] = useState(defaultSettings.value);
   const [type, setType] = useState(defaultSettings.type);
+  const [remunerationType, setRemunerationType] = useState("illimite");
 
   const codeConflict = code.trim() !== "" && existingCodes.has(code.trim().toUpperCase());
 
@@ -603,6 +606,7 @@ function AcceptModal({
     formData.append("code", code);
     formData.append("value", String(value));
     formData.append("type", type);
+    formData.append("remuneration_type", remunerationType);
     submit(formData, { method: "post" });
     onClose();
   };
@@ -701,6 +705,24 @@ function AcceptModal({
                 </select>
               </div>
             </div>
+          </div>
+
+          {/* LIMITATION */}
+          <div style={{ marginTop: "16px", padding: "12px 16px", backgroundColor: "#fffbeb", borderRadius: "8px", border: "1px solid #fde68a" }}>
+            <div style={{ fontSize: "12px", fontWeight: 600, color: "#92400e", marginBottom: "8px", display: "flex", alignItems: "center", gap: "6px" }}>
+              <svg width="13" height="13" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" /></svg>
+              Limitation réglementaire
+            </div>
+            <select
+              className="bsl-modal__input bsl-modal__select"
+              value={remunerationType}
+              onChange={(e) => setRemunerationType(e.target.value)}
+              style={{ fontSize: "13px" }}
+            >
+              <option value="illimite">Illimité (par défaut)</option>
+              <option value="limite_annee">Limité (annuel)</option>
+              <option value="sans_remuneration">Aucune rémunération</option>
+            </select>
           </div>
         </div>
         <div className="bsl-modal__footer">
