@@ -372,6 +372,9 @@ export function NavBar() {
           <span className="sidebar-settings-info">
             {config.creditAmount}€ tous les {config.threshold}€ de CA généré
           </span>
+          <span className="sidebar-settings-info">
+            Bloqué = palier atteint, crédits versés · Règle unique pour tous
+          </span>
 
           {showConfigPanel && !isLocked && (
             <form id="sidebar-config-panel" onSubmit={handleSaveConfig} className="sidebar-settings-form">
