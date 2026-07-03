@@ -118,6 +118,8 @@ export function NavBar() {
     setShowCodeBlock,
     showCABlock,
     setShowCABlock,
+    showLimitationBlock,
+    setShowLimitationBlock,
     config,
     setConfig,
     validationDefaults,
@@ -207,20 +209,26 @@ export function NavBar() {
     {
       label: "Gestion Pros Santés",
       icon: <IconProfessionals />,
-      isActive: onAppPage && !showCodeBlock && !showCABlock,
-      onClick: () => { setShowCodeBlock(false); setShowCABlock(false); navigate("/app"); },
+      isActive: onAppPage && !showCodeBlock && !showCABlock && !showLimitationBlock,
+      onClick: () => { setShowCodeBlock(false); setShowCABlock(false); setShowLimitationBlock(false); navigate("/app"); },
     },
     {
       label: "Gestion Code Promo",
       icon: <IconPromo />,
       isActive: onAppPage && showCodeBlock,
-      onClick: () => { setShowCodeBlock(true); setShowCABlock(false); navigate("/app"); },
+      onClick: () => { setShowCodeBlock(true); setShowCABlock(false); setShowLimitationBlock(false); navigate("/app"); },
     },
     {
       label: "Gestion Chiffre d'affaires",
       icon: <IconClients />,
       isActive: onAppPage && showCABlock,
-      onClick: () => { setShowCABlock(true); setShowCodeBlock(false); navigate("/app"); },
+      onClick: () => { setShowCABlock(true); setShowCodeBlock(false); setShowLimitationBlock(false); navigate("/app"); },
+    },
+    {
+      label: "Gestion Limitation",
+      icon: <IconLock />,
+      isActive: onAppPage && showLimitationBlock,
+      onClick: () => { setShowLimitationBlock(true); setShowCodeBlock(false); setShowCABlock(false); navigate("/app"); },
     },
   ];
 
@@ -363,6 +371,9 @@ export function NavBar() {
           </button>
           <span className="sidebar-settings-info">
             {config.creditAmount}€ tous les {config.threshold}€ de CA généré
+          </span>
+          <span className="sidebar-settings-info">
+            Bloqué = palier atteint, crédits versés · Règle unique pour tous
           </span>
 
           {showConfigPanel && !isLocked && (

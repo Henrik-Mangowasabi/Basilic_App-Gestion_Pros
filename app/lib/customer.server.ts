@@ -3,6 +3,34 @@ import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 
 const PRO_TAG = "pro_sante";
 
+const REMUNERATION_TAGS = ["pro_illimite", "pro_limite_annee", "pro_sans_remuneration"];
+const REMUNERATION_TYPE_TO_TAG: Record<string, string> = {
+  illimite: "pro_illimite",
+  limite_annee: "pro_limite_annee",
+  sans_remuneration: "pro_sans_remuneration",
+};
+
+export async function syncRemunerationTag(
+  admin: AdminApiContext,
+  customerId: string,
+  remunerationType: string,
+) {
+  const newTag = REMUNERATION_TYPE_TO_TAG[remunerationType] || "pro_illimite";
+  try {
+    const mRemove = `mutation tagsRemove($id: ID!, $tags: [String!]!) { tagsRemove(id: $id, tags: $tags) { userErrors { field message } } }`;
+    await admin.graphql(mRemove, { variables: { id: customerId, tags: REMUNERATION_TAGS } });
+  } catch (e) {
+    console.warn("[REMUN_TAG] Suppression tags échouée (non-bloquant):", e);
+  }
+  try {
+    const mAdd = `mutation tagsAdd($id: ID!, $tags: [String!]!) { tagsAdd(id: $id, tags: $tags) { userErrors { field message } } }`;
+    await admin.graphql(mAdd, { variables: { id: customerId, tags: [newTag] } });
+  } catch (e) {
+    console.warn("[REMUN_TAG] Ajout tag échoué (non-bloquant):", e);
+  }
+  return { success: true };
+}
+
 function cleanEmail(email: string) {
   return email ? email.trim().toLowerCase() : "";
 }
