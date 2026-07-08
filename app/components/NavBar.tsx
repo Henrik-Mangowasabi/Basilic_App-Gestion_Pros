@@ -86,6 +86,12 @@ function IconGear() {
   );
 }
 
+function formatDateFR(isoDate: string | null): string {
+  if (!isoDate) return "Tout l'historique";
+  const [y, m, d] = isoDate.split("-");
+  return `${d}/${m}/${y}`;
+}
+
 // --- PASSWORD INPUT (focus via ref pour éviter autoFocus) ---
 function PasswordInput({ value, onChange, onEnter }: { value: string; onChange: (v: string) => void; onEnter: () => void }) {
   const ref = useRef<HTMLInputElement>(null);
@@ -125,6 +131,8 @@ export function NavBar() {
     validationDefaults,
     setValidationDefaults,
     showToast,
+    recalcFromDate,
+    setRecalcFromDate,
   } = useEditMode();
 
   const navigate = useNavigate();
@@ -138,6 +146,10 @@ export function NavBar() {
 
   // Validation defaults
   const [showValidationPanel, setShowValidationPanel] = useState(false);
+
+  // Réglage Date
+  const [showDatePanel, setShowDatePanel] = useState(false);
+  const [localDate, setLocalDate] = useState(recalcFromDate ?? "");
   const [valDefaults, setValDefaults] = useState(validationDefaults);
   const rootData = useRouteLoaderData("routes/app") as any;
   const validationCount: number = rootData?.pendingCount ?? 0;
@@ -192,17 +204,28 @@ export function NavBar() {
 
   const toggleConfigPanel = () => {
     setShowConfigPanel(!showConfigPanel);
-    if (!showConfigPanel) setShowValidationPanel(false);
+    if (!showConfigPanel) { setShowValidationPanel(false); setShowDatePanel(false); }
   };
 
   const toggleValidationPanel = () => {
     setShowValidationPanel(!showValidationPanel);
-    if (!showValidationPanel) setShowConfigPanel(false);
+    if (!showValidationPanel) { setShowConfigPanel(false); setShowDatePanel(false); }
+  };
+
+  const toggleDatePanel = () => {
+    const opening = !showDatePanel;
+    setShowDatePanel(opening);
+    if (opening) {
+      setShowConfigPanel(false);
+      setShowValidationPanel(false);
+      setLocalDate(recalcFromDate ?? "");
+    }
   };
 
   const handleMouseLeave = () => {
     setShowConfigPanel(false);
     setShowValidationPanel(false);
+    setShowDatePanel(false);
   };
 
   const gestionItems = [
@@ -482,6 +505,79 @@ export function NavBar() {
                   type="button"
                   className="sidebar-lock-btn sidebar-lock-btn--cancel"
                   onClick={() => setShowValidationPanel(false)}
+                >
+                  ✕
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
+      )}
+
+      {/* RÉGLAGE DATE — visible uniquement en vue CA */}
+      {onAppPage && showCABlock && (
+        <div className="sidebar-settings">
+          <button
+            type="button"
+            className="sidebar-lock-btn sidebar-lock-btn--settings"
+            onClick={toggleDatePanel}
+            aria-expanded={showDatePanel}
+          >
+            <IconGear />
+            Réglage Date
+          </button>
+          <span className="sidebar-settings-info">
+            {recalcFromDate ? `Depuis le ${formatDateFR(recalcFromDate)}` : "Tout l'historique"}
+          </span>
+
+          {showDatePanel && (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                setRecalcFromDate(localDate || null);
+                setShowDatePanel(false);
+                showToast({
+                  title: "Date enregistrée",
+                  msg: localDate ? `Recalcul depuis le ${formatDateFR(localDate)}` : "Tout l'historique",
+                  type: "success",
+                });
+              }}
+              className="sidebar-settings-form"
+            >
+              <div className="sidebar-settings-row">
+                <div className="sidebar-settings-field">
+                  <label htmlFor="sb-recalc-date" className="sidebar-settings-label">Depuis le</label>
+                  <input
+                    id="sb-recalc-date"
+                    type="date"
+                    value={localDate}
+                    onChange={(e) => setLocalDate(e.target.value)}
+                    className="sidebar-lock-input"
+                  />
+                </div>
+              </div>
+              <div className="sidebar-lock-form-actions">
+                <button type="submit" className="sidebar-lock-btn sidebar-lock-btn--confirm">
+                  Enregistrer
+                </button>
+                {localDate && (
+                  <button
+                    type="button"
+                    className="sidebar-lock-btn sidebar-lock-btn--cancel"
+                    onClick={() => {
+                      setLocalDate("");
+                      setRecalcFromDate(null);
+                      setShowDatePanel(false);
+                      showToast({ title: "Date effacée", msg: "Tout l'historique sera pris en compte.", type: "info" });
+                    }}
+                  >
+                    Effacer
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="sidebar-lock-btn sidebar-lock-btn--cancel"
+                  onClick={() => setShowDatePanel(false)}
                 >
                   ✕
                 </button>

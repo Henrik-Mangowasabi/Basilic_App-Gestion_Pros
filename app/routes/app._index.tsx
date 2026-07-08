@@ -1321,8 +1321,8 @@ function RecalculateSingleButton({ entry, onDone }: { entry: any; onDone: () => 
 
 function RecalculateSingleModal({ entry, onClose, onDone }: { entry: any; onClose: () => void; onDone: () => void }) {
   const [loading, setLoading] = useState(false);
-  const [fromDate, setFromDate] = useState("");
   const [done, setDone] = useState(false);
+  const { recalcFromDate } = useEditMode();
   const revalidator = useRevalidator();
   const modalRef = useRef<HTMLDivElement>(null);
   useFocusTrap(modalRef, true, onClose);
@@ -1333,7 +1333,7 @@ function RecalculateSingleModal({ entry, onClose, onDone }: { entry: any; onClos
     fd.append("metaobjectId", entry.id);
     fd.append("code", entry.code);
     if (entry.customer_id) fd.append("customerId", entry.customer_id);
-    if (fromDate) fd.append("fromDate", fromDate);
+    if (recalcFromDate) fd.append("fromDate", recalcFromDate);
     try {
       await fetch("/app/api/recalculate-cache", { method: "POST", body: fd });
       setDone(true);
@@ -1361,19 +1361,10 @@ function RecalculateSingleModal({ entry, onClose, onDone }: { entry: any; onClos
                 <br /><br />
                 <strong style={{ color: "#008060" }}>Aucun store credit ne sera crédité</strong> — seuls le CA et le nombre de commandes sont mis à jour.
               </p>
-              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                <label htmlFor="singleFromDate" style={{ fontSize: "13px", fontWeight: 600, color: "#333" }}>
-                  Compter les commandes depuis le <span style={{ fontWeight: 400, color: "#888" }}>(optionnel — laisser vide pour tout l&apos;historique)</span>
-                </label>
-                <input
-                  id="singleFromDate"
-                  type="date"
-                  value={fromDate}
-                  onChange={(e) => setFromDate(e.target.value)}
-                  disabled={loading}
-                  style={{ padding: "8px 10px", border: "1px solid #ccc", borderRadius: "6px", fontSize: "14px", width: "200px" }}
-                />
-              </div>
+              <p style={{ fontSize: "13px", margin: 0, padding: "8px 10px", background: "var(--color-gray-100, #f4f4f4)", borderRadius: "6px", color: "#555" }}>
+                Période : <strong>{recalcFromDate ? `Depuis le ${recalcFromDate.split("-").reverse().join("/")}` : "Tout l'historique"}</strong>
+                <span style={{ color: "#888", fontSize: "12px" }}> — modifiable via Réglage Date dans le panneau latéral</span>
+              </p>
             </div>
           ) : (
             <p style={{ fontSize: "14px", color: "#008060", fontWeight: 600, margin: 0 }}>Recalcul terminé ✓</p>
@@ -1407,7 +1398,7 @@ function RecalculateCacheModal({ entries, onClose }: { entries: any[]; onClose: 
   const [total, setTotal] = useState(entries.filter((e) => e.code).length);
   const [errors, setErrors] = useState<string[]>([]);
   const [done, setDone] = useState(false);
-  const [fromDate, setFromDate] = useState("");
+  const { recalcFromDate } = useEditMode();
   const revalidator = useRevalidator();
   const modalRef = useRef<HTMLDivElement>(null);
   useFocusTrap(modalRef, true, onClose);
@@ -1422,7 +1413,7 @@ function RecalculateCacheModal({ entries, onClose }: { entries: any[]; onClose: 
 
     try {
       const body = new FormData();
-      if (fromDate) body.append("fromDate", fromDate);
+      if (recalcFromDate) body.append("fromDate", recalcFromDate);
       const res = await fetch("/app/api/recalculate-all", { method: "POST", body });
       if (!res.ok || !res.body) {
         setErrors([`Erreur serveur: HTTP ${res.status}`]);
@@ -1492,18 +1483,10 @@ function RecalculateCacheModal({ entries, onClose }: { entries: any[]; onClose: 
                 <br /><br />
                 <strong style={{ color: "#008060" }}>Aucun store credit ne sera crédité</strong> — seuls les compteurs de cache (CA, commandes) seront mis à jour.
               </p>
-              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                <label htmlFor="fromDate" style={{ fontSize: "13px", fontWeight: 600, color: "#333" }}>
-                  Compter les commandes depuis le <span style={{ fontWeight: 400, color: "#888" }}>(optionnel — laisser vide pour tout l&apos;historique)</span>
-                </label>
-                <input
-                  id="fromDate"
-                  type="date"
-                  value={fromDate}
-                  onChange={(e) => setFromDate(e.target.value)}
-                  style={{ padding: "8px 10px", border: "1px solid #ccc", borderRadius: "6px", fontSize: "14px", width: "200px" }}
-                />
-              </div>
+              <p style={{ fontSize: "13px", margin: 0, padding: "8px 10px", background: "var(--color-gray-100, #f4f4f4)", borderRadius: "6px", color: "#555" }}>
+                Période : <strong>{recalcFromDate ? `Depuis le ${recalcFromDate.split("-").reverse().join("/")}` : "Tout l'historique"}</strong>
+                <span style={{ color: "#888", fontSize: "12px" }}> — modifiable via Réglage Date dans le panneau latéral</span>
+              </p>
             </div>
           )}
           {isRunning && (

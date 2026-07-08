@@ -27,6 +27,8 @@ type EditModeContextType = {
   toast: ToastData | null;
   showToast: (t: ToastData) => void;
   dismissToast: () => void;
+  recalcFromDate: string | null;
+  setRecalcFromDate: (v: string | null) => void;
 };
 
 const EditModeContext = createContext<EditModeContextType | null>(null);
@@ -56,6 +58,12 @@ export function EditModeProvider({
   const [showLimitationBlock, setShowLimitationBlock] = useState(false);
   const [config, setConfigState] = useState(initialConfig ?? { threshold: 500, creditAmount: 10 });
   const [validationDefaults, setValidationDefaultsState] = useState<ValidationDefaults>(initialValidationDefaults ?? { value: 5, type: "%", codePrefix: "PRO_" });
+  const [recalcFromDate, setRecalcFromDateState] = useState<string | null>(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("basilic_recalculate_from_date") ?? null;
+    }
+    return null;
+  });
 
   const setIsLocked = useCallback((v: boolean) => {
     setIsLockedState(v);
@@ -69,6 +77,15 @@ export function EditModeProvider({
   const setValidationDefaults = useCallback((v: ValidationDefaults) => {
     setValidationDefaultsState(v);
   }, []);
+
+  const setRecalcFromDate = useCallback((v: string | null) => {
+    setRecalcFromDateState(v);
+    try {
+      if (v) localStorage.setItem("basilic_recalculate_from_date", v);
+      else localStorage.removeItem("basilic_recalculate_from_date");
+    } catch {}
+  }, []);
+
   const [toast, setToast] = useState<ToastData | null>(null);
 
   const showToast = useCallback((t: ToastData) => setToast(t), []);
@@ -117,6 +134,8 @@ export function EditModeProvider({
         toast,
         showToast,
         dismissToast,
+        recalcFromDate,
+        setRecalcFromDate,
       }}
     >
       {children}
