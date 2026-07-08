@@ -8,6 +8,9 @@ const CONCURRENCY = 10;
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
+  const formData = await request.formData();
+  const fromDate = formData.get("fromDate") as string | null;
+  const dateFilter = fromDate ? `created_at:>="${fromDate}"` : undefined;
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -33,7 +36,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const allCodes = [...new Set<string>(
           entries.map((e: any) => e.code.toUpperCase()).filter(Boolean),
         )];
-        const statsMap = await queryOrderStatsByCodeBatches(admin, allCodes);
+        const statsMap = await queryOrderStatsByCodeBatches(admin, allCodes, dateFilter);
 
         // Phase 3 : mettre à jour chaque pro (mutations serveur-side)
         send({ phase: "updating", progress: 0, total });

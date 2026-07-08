@@ -1335,6 +1335,7 @@ function RecalculateCacheModal({ entries, onClose }: { entries: any[]; onClose: 
   const [total, setTotal] = useState(entries.filter((e) => e.code).length);
   const [errors, setErrors] = useState<string[]>([]);
   const [done, setDone] = useState(false);
+  const [fromDate, setFromDate] = useState("");
   const revalidator = useRevalidator();
   const modalRef = useRef<HTMLDivElement>(null);
   useFocusTrap(modalRef, true, onClose);
@@ -1348,7 +1349,9 @@ function RecalculateCacheModal({ entries, onClose }: { entries: any[]; onClose: 
     setDone(false);
 
     try {
-      const res = await fetch("/app/api/recalculate-all", { method: "POST" });
+      const body = new FormData();
+      if (fromDate) body.append("fromDate", fromDate);
+      const res = await fetch("/app/api/recalculate-all", { method: "POST", body });
       if (!res.ok || !res.body) {
         setErrors([`Erreur serveur: HTTP ${res.status}`]);
         setPhase("idle");
@@ -1411,11 +1414,25 @@ function RecalculateCacheModal({ entries, onClose }: { entries: any[]; onClose: 
         </div>
         <div className="bsl-modal__body--import">
           {!done && phase === "idle" && (
-            <p style={{ fontSize: "14px", color: "#555", margin: 0 }}>
-              Cette opération va recalculer les statistiques de chiffre d&apos;affaires pour <strong>{total} partenaire{total > 1 ? "s" : ""}</strong> en interrogeant l&apos;historique complet des commandes Shopify.
-              <br /><br />
-              <strong style={{ color: "#008060" }}>Aucun store credit ne sera crédité</strong> — seuls les compteurs de cache (CA, commandes) seront mis à jour.
-            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+              <p style={{ fontSize: "14px", color: "#555", margin: 0 }}>
+                Cette opération va recalculer les statistiques de chiffre d&apos;affaires pour <strong>{total} partenaire{total > 1 ? "s" : ""}</strong> en interrogeant l&apos;historique des commandes Shopify.
+                <br /><br />
+                <strong style={{ color: "#008060" }}>Aucun store credit ne sera crédité</strong> — seuls les compteurs de cache (CA, commandes) seront mis à jour.
+              </p>
+              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                <label htmlFor="fromDate" style={{ fontSize: "13px", fontWeight: 600, color: "#333" }}>
+                  Compter les commandes depuis le <span style={{ fontWeight: 400, color: "#888" }}>(optionnel — laisser vide pour tout l&apos;historique)</span>
+                </label>
+                <input
+                  id="fromDate"
+                  type="date"
+                  value={fromDate}
+                  onChange={(e) => setFromDate(e.target.value)}
+                  style={{ padding: "8px 10px", border: "1px solid #ccc", borderRadius: "6px", fontSize: "14px", width: "200px" }}
+                />
+              </div>
+            </div>
           )}
           {isRunning && (
             <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
