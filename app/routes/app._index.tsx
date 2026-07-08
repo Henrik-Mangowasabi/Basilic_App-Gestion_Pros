@@ -1299,32 +1299,104 @@ function ImportForm({ existingEntries, onClose }: { existingEntries: any[]; onCl
 
 // --- BOUTON RECALCUL ENTRÉE INDIVIDUELLE ---
 function RecalculateSingleButton({ entry, onDone }: { entry: any; onDone: () => void }) {
-  const [loading, setLoading] = useState(false);
-  const revalidator = useRevalidator();
+  const [showModal, setShowModal] = useState(false);
+  return (
+    <>
+      <button type="button" className="mf-dropdown-item" onClick={() => setShowModal(true)}>
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 20 20" fill="currentColor" className="mf-dropdown-item__icon">
+          <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
+        </svg>
+        <span className="mf-dropdown-item__title">Recalculer le CA</span>
+      </button>
+      {showModal && (
+        <RecalculateSingleModal
+          entry={entry}
+          onClose={() => setShowModal(false)}
+          onDone={() => { setShowModal(false); onDone(); }}
+        />
+      )}
+    </>
+  );
+}
 
-  const handleClick = async () => {
+function RecalculateSingleModal({ entry, onClose, onDone }: { entry: any; onClose: () => void; onDone: () => void }) {
+  const [loading, setLoading] = useState(false);
+  const [fromDate, setFromDate] = useState("");
+  const [done, setDone] = useState(false);
+  const revalidator = useRevalidator();
+  const modalRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(modalRef, true, onClose);
+
+  const handleRecalculate = async () => {
     setLoading(true);
     const fd = new FormData();
     fd.append("metaobjectId", entry.id);
     fd.append("code", entry.code);
     if (entry.customer_id) fd.append("customerId", entry.customer_id);
+    if (fromDate) fd.append("fromDate", fromDate);
     try {
       await fetch("/app/api/recalculate-cache", { method: "POST", body: fd });
-    } finally {
-      setLoading(false);
+      setDone(true);
       indexCache = null;
       revalidator.revalidate();
-      onDone();
+    } finally {
+      setLoading(false);
     }
   };
 
+  const name = [entry.first_name, entry.last_name].filter(Boolean).join(" ");
+
   return (
-    <button type="button" className="mf-dropdown-item" onClick={handleClick} disabled={loading}>
-      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 20 20" fill="currentColor" className="mf-dropdown-item__icon">
-        <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
-      </svg>
-      <span className="mf-dropdown-item__title">{loading ? "Recalcul..." : "Recalculer le CA"}</span>
-    </button>
+    <div role="presentation" className="bsl-modal" onClick={(e) => { if (e.target === e.currentTarget && !loading) onClose(); }}>
+      <div ref={modalRef} role="dialog" aria-modal="true" aria-label="Recalculer le CA" className="bsl-modal__dialog bsl-modal__dialog--md">
+        <div className="bsl-modal__header">
+          <h2 className="bsl-modal__title">Recalculer le CA — {name}</h2>
+          <button type="button" onClick={onClose} disabled={loading} className="bsl-modal__close">✕</button>
+        </div>
+        <div className="bsl-modal__body--import">
+          {!done ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+              <p style={{ fontSize: "14px", color: "#555", margin: 0 }}>
+                Recalcule le CA de <strong>{name}</strong> (code : <strong>{entry.code}</strong>) depuis l&apos;historique des commandes Shopify.
+                <br /><br />
+                <strong style={{ color: "#008060" }}>Aucun store credit ne sera crédité</strong> — seuls le CA et le nombre de commandes sont mis à jour.
+              </p>
+              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                <label htmlFor="singleFromDate" style={{ fontSize: "13px", fontWeight: 600, color: "#333" }}>
+                  Compter les commandes depuis le <span style={{ fontWeight: 400, color: "#888" }}>(optionnel — laisser vide pour tout l&apos;historique)</span>
+                </label>
+                <input
+                  id="singleFromDate"
+                  type="date"
+                  value={fromDate}
+                  onChange={(e) => setFromDate(e.target.value)}
+                  disabled={loading}
+                  style={{ padding: "8px 10px", border: "1px solid #ccc", borderRadius: "6px", fontSize: "14px", width: "200px" }}
+                />
+              </div>
+            </div>
+          ) : (
+            <p style={{ fontSize: "14px", color: "#008060", fontWeight: 600, margin: 0 }}>Recalcul terminé ✓</p>
+          )}
+        </div>
+        <div className="bsl-modal__footer">
+          <button type="button" onClick={done ? onDone : onClose} disabled={loading} className="bsl-modal__btn bsl-modal__btn--cancel">
+            {done ? "Fermer" : "Annuler"}
+          </button>
+          {!done && (
+            <button
+              type="button"
+              onClick={handleRecalculate}
+              disabled={loading}
+              className="bsl-modal__btn bsl-modal__btn--primary"
+              style={{ background: loading ? "var(--color-gray-300)" : "#008060", cursor: loading ? "not-allowed" : "pointer", color: loading ? "var(--color-gray-500)" : "white" }}
+            >
+              {loading ? <><Spinner /> Recalcul...</> : "Recalculer"}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 

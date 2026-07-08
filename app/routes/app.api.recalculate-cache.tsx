@@ -12,6 +12,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const customerId = formData.get("customerId") as string | null;
   const preRevenueStr = formData.get("preRevenue") as string | null;
   const preCountStr = formData.get("preCount") as string | null;
+  const fromDate = formData.get("fromDate") as string | null;
 
   if (!metaobjectId || !code) {
     return new Response(JSON.stringify({ error: "metaobjectId and code sont requis" }), {
@@ -36,7 +37,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       let restSuccess = false;
 
       try {
-        const restUrl = `https://${session.shop}/admin/api/2025-10/orders.json?discount_code=${encodeURIComponent(codeUpper)}&status=any&limit=250&fields=id,name,created_at,discount_codes,subtotal_price,financial_status,cancel_reason,refunds`;
+        let restUrl = `https://${session.shop}/admin/api/2025-10/orders.json?discount_code=${encodeURIComponent(codeUpper)}&status=any&limit=250&fields=id,name,created_at,discount_codes,subtotal_price,financial_status,cancel_reason,refunds`;
+        if (fromDate) restUrl += `&created_at_min=${encodeURIComponent(fromDate + "T00:00:00")}`;
+
         const restResp = await fetch(restUrl, {
           headers: {
             "X-Shopify-Access-Token": session.accessToken!,
