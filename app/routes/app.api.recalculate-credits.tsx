@@ -24,7 +24,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (creditsToDeposit > 0 && customerId) {
     try {
       // Récupérer la devise du shop
-      const rShop = await admin.graphql(`#graphql query { shop { currencyCode } }`);
+      const rShop = await admin.graphql(`#graphql
+        query { shop { currencyCode } }
+      `);
       const dShop = await rShop.json() as any;
       const currencyCode: string = dShop.data?.shop?.currencyCode || "EUR";
 
