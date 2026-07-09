@@ -1297,6 +1297,178 @@ function ImportForm({ existingEntries, onClose }: { existingEntries: any[]; onCl
   );
 }
 
+// --- BOUTON RECALCUL CRÉDITS INDIVIDUEL ---
+function RecalculateCreditsSingleButton({ entry, onDone }: { entry: any; onDone: () => void }) {
+  const [showModal, setShowModal] = useState(false);
+  return (
+    <>
+      <button type="button" className="mf-dropdown-item" onClick={() => setShowModal(true)}>
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 20 20" fill="currentColor" className="mf-dropdown-item__icon">
+          <path d="M8.433 7.418c.155-.103.346-.196.567-.267v1.698a2.305 2.305 0 01-.567-.267C8.07 8.34 8 8.114 8 8c0-.114.07-.34.433-.582zM11 12.849v-1.698c.22.071.412.164.567.267.364.243.433.468.433.582 0 .114-.07.34-.433.582a2.305 2.305 0 01-.567.267z" />
+          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-13a1 1 0 10-2 0v.092a4.535 4.535 0 00-1.676.662C6.602 6.234 6 7.009 6 8c0 .99.602 1.765 1.324 2.246.48.32 1.054.545 1.676.662v1.941c-.391-.127-.68-.317-.843-.504a1 1 0 10-1.51 1.31c.562.649 1.413 1.076 2.353 1.253V15a1 1 0 102 0v-.092a4.535 4.535 0 001.676-.662C13.398 13.766 14 12.991 14 12c0-.99-.602-1.765-1.324-2.246A4.535 4.535 0 0011 9.092V7.151c.391.127.68.317.843.504a1 1 0 101.511-1.31c-.563-.649-1.413-1.076-2.354-1.253V5z" clipRule="evenodd" />
+        </svg>
+        <span className="mf-dropdown-item__title">Recalculer les crédits</span>
+      </button>
+      {showModal && (
+        <RecalculateCreditsSingleModal
+          entry={entry}
+          onClose={() => setShowModal(false)}
+          onDone={() => { setShowModal(false); onDone(); }}
+        />
+      )}
+    </>
+  );
+}
+
+function RecalculateCreditsSingleModal({ entry, onClose, onDone }: { entry: any; onClose: () => void; onDone: () => void }) {
+  const { isLocked, config } = useEditMode();
+  const [loading, setLoading] = useState(false);
+  const [done, setDone] = useState(false);
+  const [depositedAmount, setDepositedAmount] = useState(0);
+  const revalidator = useRevalidator();
+  const modalRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(modalRef, true, onClose);
+
+  const totalCA = parseFloat(entry.cache_revenue || "0");
+  const creditEarned = parseFloat(entry.cache_credit_earned || "0");
+  const currentRemainder = parseFloat(entry.cache_ca_remainder || "0");
+  const { threshold, creditAmount } = config;
+
+  const expectedCrossings = Math.floor(totalCA / threshold);
+  const expectedCreditEarned = expectedCrossings * creditAmount;
+  const expectedRemainder = Math.round((totalCA - expectedCrossings * threshold) * 100) / 100;
+  const creditsToDeposit = Math.max(0, Math.round((expectedCreditEarned - creditEarned) * 100) / 100);
+  const remainderChanged = Math.abs(currentRemainder - expectedRemainder) > 0.01;
+  const overCredited = expectedCreditEarned < creditEarned;
+  const nothingToDo = creditsToDeposit === 0 && !remainderChanged;
+
+  const name = [entry.first_name, entry.last_name].filter(Boolean).join(" ");
+
+  const handleApply = async () => {
+    setLoading(true);
+    try {
+      const fd = new FormData();
+      fd.append("metaobjectId", entry.id);
+      if (entry.customer_id) fd.append("customerId", entry.customer_id);
+      fd.append("creditsToDeposit", String(creditsToDeposit));
+      fd.append("newCreditEarned", String(expectedCreditEarned));
+      fd.append("newCaRemainder", String(expectedRemainder));
+      const res = await fetch("/app/api/recalculate-credits", { method: "POST", body: fd });
+      const data = await res.json() as any;
+      if (data.success) {
+        setDepositedAmount(data.creditsDeposited || 0);
+        setDone(true);
+        indexCache = null;
+        revalidator.revalidate();
+      } else {
+        alert(`Erreur : ${data.error || "Inconnue"}`);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const btnDisabled = loading || isLocked || nothingToDo || overCredited;
+  const btnStyle = {
+    background: btnDisabled ? "var(--color-gray-300)" : "#008060",
+    cursor: btnDisabled ? "not-allowed" : "pointer",
+    color: btnDisabled ? "var(--color-gray-500)" : "white",
+  };
+
+  return (
+    <div role="presentation" className="bsl-modal" onClick={(e) => { if (e.target === e.currentTarget && !loading) onClose(); }}>
+      <div ref={modalRef} role="dialog" aria-modal="true" aria-label="Recalculer les crédits" className="bsl-modal__dialog bsl-modal__dialog--md">
+        <div className="bsl-modal__header">
+          <h2 className="bsl-modal__title">Recalculer les crédits — {name}</h2>
+          <button type="button" onClick={onClose} disabled={loading} className="bsl-modal__close">✕</button>
+        </div>
+        <div className="bsl-modal__body--import">
+          {!done ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+              <table style={{ width: "100%", fontSize: "14px", borderCollapse: "collapse" }}>
+                <tbody>
+                  <tr>
+                    <td style={{ padding: "5px 0", color: "#555" }}>CA généré</td>
+                    <td style={{ textAlign: "right", fontWeight: 600 }}>{totalCA.toFixed(2)}€</td>
+                  </tr>
+                  <tr>
+                    <td style={{ padding: "5px 0", color: "#555" }}>Palier configuré</td>
+                    <td style={{ textAlign: "right" }}>{threshold}€ → {creditAmount}€ / palier</td>
+                  </tr>
+                  <tr style={{ borderTop: "1px solid #eee" }}>
+                    <td style={{ padding: "7px 0", color: "#555" }}>Paliers atteints</td>
+                    <td style={{ textAlign: "right", fontWeight: 600 }}>
+                      {expectedCrossings} × {creditAmount}€ = <strong>{expectedCreditEarned.toFixed(2)}€</strong>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style={{ padding: "5px 0", color: "#555" }}>Déjà versés</td>
+                    <td style={{ textAlign: "right" }}>{creditEarned.toFixed(2)}€</td>
+                  </tr>
+                  <tr style={{ borderTop: "1px solid #ddd", background: creditsToDeposit > 0 ? "#f0faf5" : "transparent" }}>
+                    <td style={{ padding: "8px 4px", fontWeight: 700, color: creditsToDeposit > 0 ? "#008060" : "#333" }}>
+                      {creditsToDeposit > 0 ? "À déposer" : overCredited ? "Sur-crédité" : "Solde crédits"}
+                    </td>
+                    <td style={{ textAlign: "right", fontWeight: 700, color: creditsToDeposit > 0 ? "#008060" : overCredited ? "#d82c0d" : "#333" }}>
+                      {creditsToDeposit > 0 ? `+${creditsToDeposit.toFixed(2)}€` : overCredited ? `−${(creditEarned - expectedCreditEarned).toFixed(2)}€` : "À jour"}
+                    </td>
+                  </tr>
+                  {remainderChanged && (
+                    <tr>
+                      <td style={{ padding: "5px 4px", color: "#555", fontSize: "13px" }}>Accumulateur</td>
+                      <td style={{ textAlign: "right", fontSize: "13px", color: "#888" }}>
+                        {currentRemainder.toFixed(2)}€ → {expectedRemainder.toFixed(2)}€
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+
+              {overCredited && (
+                <p style={{ fontSize: "13px", color: "#d82c0d", padding: "8px 10px", background: "#fdf0f0", borderRadius: "6px", margin: 0 }}>
+                  Les crédits enregistrés ({creditEarned}€) dépassent les crédits attendus ({expectedCreditEarned}€) — correction manuelle nécessaire.
+                </p>
+              )}
+              {!entry.customer_id && creditsToDeposit > 0 && (
+                <p style={{ fontSize: "13px", color: "#8a6d3b", padding: "8px 10px", background: "#fffbf0", borderRadius: "6px", margin: 0 }}>
+                  Pas de client lié — le compteur sera mis à jour mais le store credit ne peut pas être déposé.
+                </p>
+              )}
+              {isLocked && (
+                <p style={{ fontSize: "13px", color: "#888", padding: "8px 10px", background: "#f4f4f4", borderRadius: "6px", margin: 0 }}>
+                  Cliquez sur «&nbsp;Modifier&nbsp;» dans le panneau latéral pour appliquer les modifications.
+                </p>
+              )}
+            </div>
+          ) : (
+            <p style={{ fontSize: "14px", color: "#008060", fontWeight: 600, margin: 0 }}>
+              {depositedAmount > 0
+                ? `${depositedAmount.toFixed(2)}€ déposés sur le compte store credit ✓`
+                : "Compteurs mis à jour ✓"}
+            </p>
+          )}
+        </div>
+        <div className="bsl-modal__footer">
+          <button type="button" onClick={done ? onDone : onClose} disabled={loading} className="bsl-modal__btn bsl-modal__btn--cancel">
+            {done ? "Fermer" : "Annuler"}
+          </button>
+          {!done && !overCredited && (
+            <button type="button" onClick={handleApply} disabled={btnDisabled} className="bsl-modal__btn bsl-modal__btn--primary" style={btnStyle}>
+              {loading
+                ? <><Spinner /> Traitement...</>
+                : nothingToDo
+                  ? "Tout est à jour"
+                  : creditsToDeposit > 0
+                    ? `Déposer +${creditsToDeposit.toFixed(2)}€`
+                    : "Corriger l'accumulateur"}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // --- BOUTON RECALCUL ENTRÉE INDIVIDUELLE ---
 function RecalculateSingleButton({ entry, onDone }: { entry: any; onDone: () => void }) {
   const [showModal, setShowModal] = useState(false);
@@ -2612,6 +2784,9 @@ export default function Index() {
                 </button>
                 {showCABlock && ctxEntry.code && (
                   <RecalculateSingleButton entry={ctxEntry} onDone={() => setContextMenuState(null)} />
+                )}
+                {showCABlock && ctxEntry.code && (
+                  <RecalculateCreditsSingleButton entry={ctxEntry} onDone={() => setContextMenuState(null)} />
                 )}
                 <button type="button" className="mf-dropdown-item mf-dropdown-item--delete"
                   onClick={() => { setContextMenuState(null); handleDeleteEntry(ctxEntry.id, `${ctxEntry.first_name} ${ctxEntry.last_name}`); }}>
