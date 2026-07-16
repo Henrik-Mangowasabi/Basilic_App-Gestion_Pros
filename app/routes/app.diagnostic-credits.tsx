@@ -220,6 +220,17 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     })
     .sort((a: any, b: any) => b.reel.ca_total - a.reel.ca_total);
 
+  // Liste compacte des dépôts à faire (illimitées uniquement) — la to-do de régularisation
+  const listeDepots = results
+    .filter((r: any) => r.statut === "illimite" && !r.bloque)
+    .map((r: any) => ({
+      code: r.code,
+      nom: r.nom,
+      a_deposer: round2(Math.max(0, r.analyse.credits_attendus_sur_ca_cache - r.cache.credits_verses)),
+    }))
+    .filter((d: any) => d.a_deposer > 0.01)
+    .sort((a: any, b: any) => b.a_deposer - a.a_deposer);
+
   return {
     genere_le: now.toISOString(),
     date_mise_en_ligne_app: appDate,
@@ -229,6 +240,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       montant_reglemente_annuel: config.regulatedCreditAmount,
     },
     nb_pros: results.length,
+    depots_a_faire: {
+      nb: listeDepots.length,
+      total: round2(listeDepots.reduce((s: number, d: any) => s + d.a_deposer, 0)),
+      liste: listeDepots,
+    },
     pros: results,
   };
 };
