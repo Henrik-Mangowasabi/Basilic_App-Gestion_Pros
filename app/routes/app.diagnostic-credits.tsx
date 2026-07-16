@@ -1,4 +1,6 @@
 import type { LoaderFunctionArgs } from "react-router";
+import { useLoaderData } from "react-router";
+import { useState } from "react";
 import { authenticate } from "../shopify.server";
 import { getMetaobjectEntries } from "../lib/metaobject.server";
 import { queryOrderStatsByCodeBatches } from "../lib/orders.server";
@@ -8,14 +10,14 @@ import { getShopConfig } from "../config.server";
 const DEFAULT_APP_DATE = "2025-12-24";
 
 /**
- * Diagnostic crédits par pro — répond à « pourquoi ce pro a X€ de crédits ? ».
+ * Page de diagnostic crédits — répond à « pourquoi ce pro a X€ de crédits ? ».
  * Recompte le CA réel depuis TOUT l'historique de commandes (l'app a read_all_orders),
  * le découpe avant/depuis la mise en ligne de l'app, et compare aux compteurs en cache.
  *
  * Usage (depuis l'admin Shopify, app ouverte) :
- *   /app/api/diagnostic-credits                          → tous les pros
- *   /app/api/diagnostic-credits?codes=AF_DEMNO,PRO_XX    → pros ciblés
- *   /app/api/diagnostic-credits?appDate=2026-01-15       → autre date de référence
+ *   /app/diagnostic-credits                          → tous les pros
+ *   /app/diagnostic-credits?codes=AF_DEMNO,PRO_XX    → pros ciblés
+ *   /app/diagnostic-credits?appDate=2026-01-15       → autre date de référence
  */
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
@@ -119,22 +121,73 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     })
     .sort((a: any, b: any) => b.reel.ca_total - a.reel.ca_total);
 
-  return new Response(
-    JSON.stringify(
-      {
-        genere_le: now.toISOString(),
-        date_mise_en_ligne_app: appDate,
-        config: {
-          seuil: config.threshold,
-          montant_illimite: config.creditAmount,
-          montant_reglemente_annuel: config.regulatedCreditAmount,
-        },
-        nb_pros: results.length,
-        pros: results,
-      },
-      null,
-      2,
-    ),
-    { headers: { "Content-Type": "application/json; charset=utf-8" } },
-  );
+  return {
+    genere_le: now.toISOString(),
+    date_mise_en_ligne_app: appDate,
+    config: {
+      seuil: config.threshold,
+      montant_illimite: config.creditAmount,
+      montant_reglemente_annuel: config.regulatedCreditAmount,
+    },
+    nb_pros: results.length,
+    pros: results,
+  };
 };
+
+export default function DiagnosticCredits() {
+  const data = useLoaderData<typeof loader>();
+  const [copied, setCopied] = useState(false);
+  const json = JSON.stringify(data, null, 2);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(json);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    } catch {
+      // Fallback : sélection manuelle du <pre>
+    }
+  };
+
+  return (
+    <div style={{ padding: "24px", maxWidth: "1100px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "16px", marginBottom: "16px" }}>
+        <h1 style={{ fontSize: "20px", fontWeight: 700, margin: 0 }}>🔎 Diagnostic crédits</h1>
+        <button
+          type="button"
+          onClick={handleCopy}
+          style={{
+            padding: "8px 16px",
+            borderRadius: "8px",
+            border: "none",
+            background: copied ? "#008060" : "#1a1a1a",
+            color: "white",
+            fontWeight: 600,
+            cursor: "pointer",
+          }}
+        >
+          {copied ? "Copié ✓" : "📋 Copier le JSON"}
+        </button>
+      </div>
+      <p style={{ fontSize: "13px", color: "#666", margin: "0 0 16px" }}>
+        {data.nb_pros} pro(s) analysé(s) · CA recompté sur tout l&apos;historique de commandes · découpage avant/depuis le {data.date_mise_en_ligne_app}.
+        Paramètres : <code>?codes=CODE1,CODE2</code> pour cibler, <code>?appDate=YYYY-MM-DD</code> pour changer la date de référence.
+      </p>
+      <pre
+        style={{
+          background: "#f6f6f7",
+          border: "1px solid #e1e3e5",
+          borderRadius: "8px",
+          padding: "16px",
+          fontSize: "12px",
+          lineHeight: 1.5,
+          overflowX: "auto",
+          whiteSpace: "pre-wrap",
+          wordBreak: "break-word",
+        }}
+      >
+        {json}
+      </pre>
+    </div>
+  );
+}
