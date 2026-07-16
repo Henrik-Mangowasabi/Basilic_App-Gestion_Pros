@@ -44,6 +44,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const prosFiltered = pros.filter((e: any) => !requestedCodes || requestedCodes.has(e.code.toUpperCase()));
 
+  // Détection des codes en double (2 fiches metaobject sur le même code = compteurs incohérents)
+  const codeCounts = new Map<string, number>();
+  for (const e of pros) {
+    const cu = e.code.toUpperCase();
+    codeCounts.set(cu, (codeCounts.get(cu) || 0) + 1);
+  }
+
   // Détection des crédits fantômes : pour chaque pro avec des crédits enregistrés,
   // on compare le compteur cache_credit_earned aux transactions store credit RÉELLES.
   // (une ancienne version du webhook enregistrait le crédit même si le virement échouait)
@@ -128,13 +135,19 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       const unlockDate = e.limitation_unlock_date || "";
       const isBlocked = remType === "limite_annee" && !!unlockDate && new Date(unlockDate) > now;
 
-      const creditsAttendusIllimite = round2(Math.floor(total.revenue / config.threshold) * config.creditAmount);
+      // Base opérationnelle = CA en cache (aligné sur le Réglage Date par le recalcul global).
+      // C'est la même base que la modale « Recalculer les crédits ».
+      const creditsAttendusSurCache = round2(Math.floor(cacheRevenue / config.threshold) * config.creditAmount);
+      const creditsAttendusToutHistorique = round2(Math.floor(total.revenue / config.threshold) * config.creditAmount);
       // CA réellement passé par les paliers (déduit des compteurs — valable si la config n'a pas changé)
       const caPasseParPaliers = round2((creditsVerses / config.creditAmount) * config.threshold + accumulateur);
 
       const sc = e.customer_id ? storeCreditMap.get(e.customer_id) : undefined;
 
       const verdicts: string[] = [];
+      if ((codeCounts.get(codeUpper) || 0) > 1) {
+        verdicts.push(`🚨 CODE EN DOUBLE : ${codeCounts.get(codeUpper)} fiches partagent ce code → supprimer le doublon via Contenu → Metaobjects (PAS via l'app, qui supprimerait aussi le code promo)`);
+      }
       if (sc && creditsVerses - sc.totalCredite > 0.01) {
         verdicts.push(`👻 CRÉDITS FANTÔMES : ${round2(creditsVerses)}€ enregistrés mais seulement ${sc.totalCredite}€ réellement versés (écart ${round2(creditsVerses - sc.totalCredite)}€) → corriger Cache Credit Earned à ${sc.totalCredite} dans le metaobject`);
       }
@@ -144,11 +157,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       if (creditsVerses > 0 && !e.customer_id) {
         verdicts.push(`👻 ${round2(creditsVerses)}€ enregistrés mais AUCUN client lié — jamais versés`);
       }
-      if (Math.abs(cacheRevenue - total.revenue) > 1) {
-        verdicts.push(`⚠ CA en cache (${round2(cacheRevenue)}€) ≠ CA réel recompté (${round2(total.revenue)}€) → lancer « Recalculer le CA »`);
+      if (Math.abs(cacheRevenue - depuis.revenue) > 1) {
+        verdicts.push(`⚠ CA en cache (${round2(cacheRevenue)}€) ≠ CA depuis la mise en ligne (${round2(depuis.revenue)}€) → lancer « Recalculer le CA » (Réglage Date actif)`);
       }
       if (avant.revenue > 1) {
-        verdicts.push(`${round2(avant.revenue)}€ de CA (${avant.count} cmd) datent d'AVANT la mise en ligne (${appDate}) — jamais passés par les paliers temps réel`);
+        verdicts.push(`ℹ ${round2(avant.revenue)}€ de CA (${avant.count} cmd) datent d'AVANT le ${appDate} — hors base de calcul des crédits (choix : seul le CA depuis le lancement compte)`);
       }
       if (isBlocked) {
         verdicts.push(`🔒 Réglementée BLOQUÉE jusqu'au ${unlockDate} — aucun crédit d'ici là, l'accumulateur (${round2(accumulateur)}€) continue de monter`);
@@ -157,11 +170,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       } else if (remType === "sans_remuneration") {
         verdicts.push(`Sans rémunération : aucun crédit ne sera jamais versé (CA compté pour les stats uniquement)`);
       } else {
-        const manque = round2(creditsAttendusIllimite - creditsVerses);
+        const manque = round2(creditsAttendusSurCache - creditsVerses);
         if (manque > 0.01) {
-          verdicts.push(`Illimitée : ${creditsAttendusIllimite}€ attendus sur le CA total vs ${round2(creditsVerses)}€ versés → « Recalculer les crédits » peut déposer +${manque}€`);
+          verdicts.push(`Illimitée : ${creditsAttendusSurCache}€ attendus sur le CA en cache vs ${round2(creditsVerses)}€ versés → « Recalculer les crédits » déposera +${manque}€`);
         } else if (manque < -0.01) {
-          verdicts.push(`Illimitée SUR-créditée de ${round2(-manque)}€ (versements sous une ancienne config ou un ancien statut ?)`);
+          verdicts.push(`Illimitée SUR-créditée de ${round2(-manque)}€ par rapport au CA en cache (versements sous une ancienne config/base — acquis, rien à faire)`);
         } else {
           verdicts.push(`Illimitée : crédits à jour ✓`);
         }
@@ -198,7 +211,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             }
           : null,
         analyse: {
-          credits_attendus_si_illimite: creditsAttendusIllimite,
+          credits_attendus_sur_ca_cache: creditsAttendusSurCache,
+          credits_attendus_si_tout_historique: creditsAttendusToutHistorique,
           ca_passe_par_les_paliers_estime: caPasseParPaliers,
           verdicts,
         },
