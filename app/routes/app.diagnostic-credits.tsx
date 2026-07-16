@@ -6,8 +6,8 @@ import { getMetaobjectEntries } from "../lib/metaobject.server";
 import { queryOrderStatsByCodeBatches } from "../lib/orders.server";
 import { getShopConfig } from "../config.server";
 
-// Date de première mise en ligne de l'app (premier commit) — modifiable via ?appDate=YYYY-MM-DD
-const DEFAULT_APP_DATE = "2025-12-24";
+// Date de lancement du programme (go-live réel) — modifiable via ?appDate=YYYY-MM-DD
+const DEFAULT_APP_DATE = "2026-03-03";
 
 /**
  * Page de diagnostic crédits — répond à « pourquoi ce pro a X€ de crédits ? ».
