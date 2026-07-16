@@ -42,8 +42,74 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const now = new Date();
   const round2 = (n: number) => Math.round(n * 100) / 100;
 
-  const results = pros
-    .filter((e: any) => !requestedCodes || requestedCodes.has(e.code.toUpperCase()))
+  const prosFiltered = pros.filter((e: any) => !requestedCodes || requestedCodes.has(e.code.toUpperCase()));
+
+  // Détection des crédits fantômes : pour chaque pro avec des crédits enregistrés,
+  // on compare le compteur cache_credit_earned aux transactions store credit RÉELLES.
+  // (une ancienne version du webhook enregistrait le crédit même si le virement échouait)
+  const creditedCustomerIds: string[] = [
+    ...new Set<string>(
+      prosFiltered
+        .filter((e: any) => parseFloat(e.cache_credit_earned || "0") > 0 && e.customer_id?.startsWith("gid://shopify/Customer/"))
+        .map((e: any) => e.customer_id as string),
+    ),
+  ];
+
+  const storeCreditMap = new Map<string, { solde: number; totalCredite: number; totalDebite: number; nbTransactions: number }>();
+  const SC_CHUNK = 20; // transactions imbriquées → petits lots pour rester sous le coût max GraphQL
+  for (let i = 0; i < creditedCustomerIds.length; i += SC_CHUNK) {
+    const chunk = creditedCustomerIds.slice(i, i + SC_CHUNK);
+    try {
+      const r = await admin.graphql(`#graphql
+        query getStoreCreditDetails($ids: [ID!]!) {
+          nodes(ids: $ids) {
+            ... on Customer {
+              id
+              storeCreditAccounts(first: 3) {
+                edges {
+                  node {
+                    id
+                    balance { amount currencyCode }
+                    transactions(first: 50) {
+                      edges {
+                        node {
+                          __typename
+                          createdAt
+                          amount { amount currencyCode }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      `, { variables: { ids: chunk } });
+      const d = (await r.json()) as any;
+      for (const node of d.data?.nodes || []) {
+        if (!node?.id) continue;
+        let solde = 0;
+        let totalCredite = 0;
+        let totalDebite = 0;
+        let nbTransactions = 0;
+        for (const accEdge of node.storeCreditAccounts?.edges || []) {
+          solde += parseFloat(accEdge.node?.balance?.amount || "0");
+          for (const txEdge of accEdge.node?.transactions?.edges || []) {
+            nbTransactions++;
+            const amt = Math.abs(parseFloat(txEdge.node?.amount?.amount || "0"));
+            if (txEdge.node?.__typename === "StoreCreditAccountCreditTransaction") totalCredite += amt;
+            if (txEdge.node?.__typename === "StoreCreditAccountDebitTransaction") totalDebite += amt;
+          }
+        }
+        storeCreditMap.set(node.id, { solde: round2(solde), totalCredite: round2(totalCredite), totalDebite: round2(totalDebite), nbTransactions });
+      }
+    } catch (scErr) {
+      console.warn("[DIAGNOSTIC] Erreur lecture store credit (lot ignoré):", scErr);
+    }
+  }
+
+  const results = prosFiltered
     .map((e: any) => {
       const codeUpper = e.code.toUpperCase();
       const total = statsTotal.get(codeUpper) ?? { revenue: 0, count: 0 };
@@ -66,7 +132,18 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       // CA réellement passé par les paliers (déduit des compteurs — valable si la config n'a pas changé)
       const caPasseParPaliers = round2((creditsVerses / config.creditAmount) * config.threshold + accumulateur);
 
+      const sc = e.customer_id ? storeCreditMap.get(e.customer_id) : undefined;
+
       const verdicts: string[] = [];
+      if (sc && creditsVerses - sc.totalCredite > 0.01) {
+        verdicts.push(`👻 CRÉDITS FANTÔMES : ${round2(creditsVerses)}€ enregistrés mais seulement ${sc.totalCredite}€ réellement versés (écart ${round2(creditsVerses - sc.totalCredite)}€) → corriger Cache Credit Earned à ${sc.totalCredite} dans le metaobject`);
+      }
+      if (creditsVerses > 0 && e.customer_id && !sc) {
+        verdicts.push(`👻 CRÉDITS FANTÔMES probables : ${round2(creditsVerses)}€ enregistrés mais aucun compte store credit lisible pour ce client`);
+      }
+      if (creditsVerses > 0 && !e.customer_id) {
+        verdicts.push(`👻 ${round2(creditsVerses)}€ enregistrés mais AUCUN client lié — jamais versés`);
+      }
       if (Math.abs(cacheRevenue - total.revenue) > 1) {
         verdicts.push(`⚠ CA en cache (${round2(cacheRevenue)}€) ≠ CA réel recompté (${round2(total.revenue)}€) → lancer « Recalculer le CA »`);
       }
@@ -112,6 +189,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           ca_depuis_app: round2(depuis.revenue),
           commandes_depuis_app: depuis.count,
         },
+        store_credit_reel: sc
+          ? {
+              solde: sc.solde,
+              total_credite: sc.totalCredite,
+              total_debite: sc.totalDebite,
+              nb_transactions: sc.nbTransactions,
+            }
+          : null,
         analyse: {
           credits_attendus_si_illimite: creditsAttendusIllimite,
           ca_passe_par_les_paliers_estime: caPasseParPaliers,
