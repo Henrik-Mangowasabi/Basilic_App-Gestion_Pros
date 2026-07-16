@@ -212,6 +212,22 @@ export function NavBar() {
     if (!showValidationPanel) { setShowConfigPanel(false); setShowDatePanel(false); }
   };
 
+  // Applique la date de recalcul : état client + persistance serveur (shop metafield,
+  // utilisée aussi par les webhooks) + toast — chemin unique pour Enregistrer et Effacer
+  const applyRecalcDate = (date: string | null) => {
+    setRecalcFromDate(date);
+    setShowDatePanel(false);
+    fetcher.submit(
+      { action: "update_recalc_date", fromDate: date || "" },
+      { method: "POST", action: "/app?index" }
+    );
+    showToast(
+      date
+        ? { title: "Date enregistrée", msg: `Recalcul depuis le ${formatDateFR(date)}`, type: "success" }
+        : { title: "Date effacée", msg: "Tout l'historique sera pris en compte.", type: "info" }
+    );
+  };
+
   const toggleDatePanel = () => {
     const opening = !showDatePanel;
     setShowDatePanel(opening);
@@ -534,13 +550,7 @@ export function NavBar() {
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                setRecalcFromDate(localDate || null);
-                setShowDatePanel(false);
-                showToast({
-                  title: "Date enregistrée",
-                  msg: localDate ? `Recalcul depuis le ${formatDateFR(localDate)}` : "Tout l'historique",
-                  type: "success",
-                });
+                applyRecalcDate(localDate || null);
               }}
               className="sidebar-settings-form"
             >
@@ -566,9 +576,7 @@ export function NavBar() {
                     className="sidebar-lock-btn sidebar-lock-btn--cancel"
                     onClick={() => {
                       setLocalDate("");
-                      setRecalcFromDate(null);
-                      setShowDatePanel(false);
-                      showToast({ title: "Date effacée", msg: "Tout l'historique sera pris en compte.", type: "info" });
+                      applyRecalcDate(null);
                     }}
                   >
                     Effacer

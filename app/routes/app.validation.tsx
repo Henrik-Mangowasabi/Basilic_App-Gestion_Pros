@@ -55,7 +55,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const shopDomain = session.shop;
 
   // Assure que displayNameKey est bien défini sur la définition du métaobjet
-  migrateMetaobjectDefinition(admin).catch(() => {});
+  migrateMetaobjectDefinition(admin, shopDomain).catch(() => {});
 
   const query = `#graphql
     query getCustomersPending($cursor: String) {

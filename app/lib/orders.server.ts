@@ -1,9 +1,11 @@
 // FICHIER : app/lib/orders.server.ts
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 import { updateCustomerProMetafields } from "./customer.server";
+import { updateMetaobjectFields } from "./metaobject.server";
+import { getRecalcFromDate } from "../config.server";
 
 const BATCH_SIZE = 50;
-const MAX_PAGES_PER_BATCH = 10; // 2 500 commandes max par lot
+const MAX_PAGES_PER_BATCH = 20; // 5 000 commandes max par lot de 50 codes
 
 const ORDERS_BATCH_QUERY = `#graphql
   query GetOrdersBatch($qs: String!, $cursor: String) {
@@ -109,6 +111,12 @@ export async function queryOrderStatsByCodeBatches(
       }
     }
 
+    // Alerte si la limite de pagination est atteinte alors qu'il reste des pages :
+    // les stats de ce lot sont potentiellement incomplètes
+    if (hasMore && pages >= maxPagesPerBatch) {
+      console.warn(`[ORDERS BATCH] ⚠ Lot ${batchNum}: limite de ${maxPagesPerBatch * 250} commandes atteinte — résultats potentiellement incomplets. Réduire BATCH_SIZE ou augmenter maxPagesPerBatch.`);
+    }
+
     // Log résumé du lot
     const batchResults = batch.filter(c => statsMap.has(c)).map(c => `${c}:${statsMap.get(c)!.count}`).join(", ");
     console.log(`[ORDERS BATCH] Lot ${batchNum}: ${batchOrderCount} commandes retournées, résultats trouvés: [${batchResults || "aucun"}]`);
@@ -189,12 +197,6 @@ export async function queryAllOrdersForCode(
         for (const appEdge of order.discountApplications?.edges || []) {
           const code = appEdge.node?.code;
           if (code) allOrderCodes.add(code.toUpperCase());
-        }
-
-        // Log ciblé pour commandes spécifiques à diagnostiquer (temporaire)
-        const DEBUG_NAMES = ["JM207072", "JM206249", "JM205823", "JM203098"];
-        if (DEBUG_NAMES.includes(order.name)) {
-          console.log(`[DEBUG ORDER] ${order.name} (${order.createdAt?.slice(0,10)}) discountCodes=${JSON.stringify(order.discountCodes)} discountApplications=${JSON.stringify(order.discountApplications?.edges?.map((e: any) => e.node))}`);
         }
 
         if (allOrderCodes.has(targetUpper)) {
@@ -286,8 +288,12 @@ export async function recalculateProCache(
   }
 
   // 2. Recalculer le CA avec tous les codes (OR query pour résultats complets)
+  // On applique la même date de départ que les recalculs manuels (Réglage Date),
+  // sinon un remboursement/annulation écraserait le CA filtré avec le CA total historique.
   try {
-    const statsMap = await queryOrderStatsByCodeBatches(admin, allCodes);
+    const fromDate = await getRecalcFromDate(admin);
+    const dateFilter = fromDate ? `created_at:>="${fromDate}"` : undefined;
+    const statsMap = await queryOrderStatsByCodeBatches(admin, allCodes, dateFilter);
     const stats = statsMap.get(codeUpper);
     const totalRevenue = stats?.revenue ?? 0;
     const totalOrders = stats?.count ?? 0;
@@ -295,22 +301,14 @@ export async function recalculateProCache(
     console.log(`[RECALC] ${codeUpper}: revenue=${totalRevenue}, orders=${totalOrders}`);
 
     // 3. Mettre à jour le MO
-    await admin.graphql(`mutation metaobjectUpdate($id: ID!, $metaobject: MetaobjectUpdateInput!) {
-      metaobjectUpdate(id: $id, metaobject: $metaobject) {
-        metaobject { id }
-        userErrors { field message }
-      }
-    }`, {
-      variables: {
-        id: metaobjectId,
-        metaobject: {
-          fields: [
-            { key: "cache_revenue", value: String(totalRevenue) },
-            { key: "cache_orders_count", value: String(totalOrders) },
-          ],
-        },
-      },
-    });
+    const updateResult = await updateMetaobjectFields(admin, metaobjectId, [
+      { key: "cache_revenue", value: String(totalRevenue) },
+      { key: "cache_orders_count", value: String(totalOrders) },
+    ]);
+    if (!updateResult.success) {
+      console.error(`[RECALC] Echec mise à jour MO pour ${codeUpper}:`, updateResult.error);
+      return { success: false, error: updateResult.error };
+    }
 
     // 4. Mettre à jour ca_genere sur le client (non-bloquant)
     if (customerId) {

@@ -2,10 +2,18 @@
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 
 /**
- * Recherche un discount Shopify existant par son code.
- * Utilisé en fallback quand un code est déjà pris lors d'une création.
+ * Codes en cours de suppression+recréation par l'app (flow "code déjà pris").
+ * Le webhook discounts/delete consulte ce Set pour NE PAS supprimer le pro
+ * quand la suppression du discount vient de l'app elle-même (recréation imminente).
  */
-async function findDiscountIdByCode(admin: AdminApiContext, code: string): Promise<string | null> {
+export const codesBeingRecreated = new Set<string>();
+
+/**
+ * Recherche un discount Shopify existant par son code.
+ * Utilisé en fallback quand un code est déjà pris lors d'une création,
+ * et par le webhook discounts/delete pour détecter une recréation.
+ */
+export async function findDiscountIdByCode(admin: AdminApiContext, code: string): Promise<string | null> {
   const query = `
     query findDiscountByCode($code: String!) {
       codeDiscountNodeByCode(code: $code) {
@@ -71,23 +79,31 @@ export async function createShopifyDiscount(
         console.log(`[DISCOUNT] Code "${data.code}" déjà existant → suppression + recréation pour attribution app...`);
         const existingId = await findDiscountIdByCode(admin, data.code);
         if (existingId) {
-          const deleteResult = await deleteShopifyDiscount(admin, existingId);
-          if (!deleteResult.success) {
-            // Impossible de supprimer → fallback : réutiliser l'ID sans attribution app
-            console.warn(`[DISCOUNT] Impossible de supprimer le discount existant (${deleteResult.error}) — réutilisation de l'ID existant`);
-            return { success: true, discountId: existingId, alreadyExisted: true };
-          }
-          // Recréer via l'app (attribution "Créé par app" garantie)
+          // Protège le pro contre le webhook discounts/delete pendant le delete+recreate
+          const codeUpper = data.code.toUpperCase();
+          codesBeingRecreated.add(codeUpper);
           try {
-            const retryResponse = await admin.graphql(mutation, { variables });
-            const retryResult = (await retryResponse.json()) as any;
-            if (retryResult.data?.discountCodeBasicCreate?.userErrors?.length > 0) {
-              return { success: false, error: retryResult.data.discountCodeBasicCreate.userErrors[0].message };
+            const deleteResult = await deleteShopifyDiscount(admin, existingId);
+            if (!deleteResult.success) {
+              // Impossible de supprimer → fallback : réutiliser l'ID sans attribution app
+              console.warn(`[DISCOUNT] Impossible de supprimer le discount existant (${deleteResult.error}) — réutilisation de l'ID existant`);
+              return { success: true, discountId: existingId, alreadyExisted: true };
             }
-            console.log(`[DISCOUNT] Code "${data.code}" recréé avec attribution app ✅`);
-            return { success: true, discountId: retryResult.data?.discountCodeBasicCreate?.codeDiscountNode?.id };
-          } catch (retryError) {
-            return { success: false, error: `Erreur recréation après suppression: ${String(retryError)}` };
+            // Recréer via l'app (attribution "Créé par app" garantie)
+            try {
+              const retryResponse = await admin.graphql(mutation, { variables });
+              const retryResult = (await retryResponse.json()) as any;
+              if (retryResult.data?.discountCodeBasicCreate?.userErrors?.length > 0) {
+                return { success: false, error: retryResult.data.discountCodeBasicCreate.userErrors[0].message };
+              }
+              console.log(`[DISCOUNT] Code "${data.code}" recréé avec attribution app ✅`);
+              return { success: true, discountId: retryResult.data?.discountCodeBasicCreate?.codeDiscountNode?.id };
+            } catch (retryError) {
+              return { success: false, error: `Erreur recréation après suppression: ${String(retryError)}` };
+            }
+          } finally {
+            // Petit délai avant de lever la protection : le webhook peut arriver après la recréation
+            setTimeout(() => codesBeingRecreated.delete(codeUpper), 30_000);
           }
         }
       }

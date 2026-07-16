@@ -35,6 +35,64 @@ function cleanEmail(email: string) {
   return email ? email.trim().toLowerCase() : "";
 }
 
+// Email inséré dans une query de recherche Shopify : entre guillemets et sans
+// caractères qui casseraient la syntaxe (guillemets, antislash)
+function emailSearchTerm(email: string) {
+  return `email:\\"${cleanEmail(email).replace(/["\\]/g, "")}\\"`;
+}
+
+/**
+ * Dépose un montant de store credit sur le compte d'un client.
+ * Utilise la devise du shop (pas de devise hardcodée) et vérifie les userErrors :
+ * retourne success: false si le virement n'a PAS eu lieu, pour que l'appelant
+ * n'avance pas ses compteurs (cache_credit_earned / cache_ca_remainder).
+ */
+export async function depositStoreCredit(
+  admin: AdminApiContext,
+  customerId: string,
+  amount: number,
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const rShop = await admin.graphql(`query { shop { currencyCode } }`);
+    const dShop = (await rShop.json()) as any;
+    const currencyCode: string = dShop.data?.shop?.currencyCode || "EUR";
+
+    const rAcc = await admin.graphql(
+      `query($id: ID!) { customer(id: $id) { storeCreditAccounts(first: 1) { edges { node { id } } } } }`,
+      { variables: { id: customerId } },
+    );
+    const dAcc = (await rAcc.json()) as any;
+    if (dAcc.errors) {
+      return { success: false, error: dAcc.errors.map((e: any) => e.message).join(", ") };
+    }
+    const accountId = dAcc.data?.customer?.storeCreditAccounts?.edges?.[0]?.node?.id;
+
+    const rCredit = await admin.graphql(
+      `mutation creditStore($id: ID!, $creditInput: StoreCreditAccountCreditInput!) {
+        storeCreditAccountCredit(id: $id, creditInput: $creditInput) {
+          storeCreditAccountTransaction { amount { amount currencyCode } }
+          userErrors { field message }
+        }
+      }`,
+      { variables: { id: accountId || customerId, creditInput: { creditAmount: { amount: String(amount), currencyCode } } } },
+    );
+    const dCredit = (await rCredit.json()) as any;
+    if (dCredit.errors) {
+      return { success: false, error: dCredit.errors.map((e: any) => e.message).join(", ") };
+    }
+    const userErrors = dCredit.data?.storeCreditAccountCredit?.userErrors || [];
+    if (userErrors.length > 0) {
+      return { success: false, error: userErrors[0].message };
+    }
+    if (!dCredit.data?.storeCreditAccountCredit?.storeCreditAccountTransaction) {
+      return { success: false, error: "Transaction store credit absente de la réponse Shopify" };
+    }
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: String(e) };
+  }
+}
+
 export async function createCustomerMetafieldDefinitions(admin: AdminApiContext) {
   const mutation = `
     mutation metafieldDefinitionCreate($definition: MetafieldDefinitionInput!) {
@@ -127,7 +185,7 @@ export async function ensureCustomerPro(admin: AdminApiContext, rawEmail: string
   console.log(`[CUSTOMER] Traitement pour : ${email} (Nom: ${firstName} ${lastName})`);
 
   // 1. Recherche Client Existant
-  const searchQuery = `query { customers(first: 1, query: "email:${email}") { edges { node { id, tags } } } }`;
+  const searchQuery = `query { customers(first: 1, query: "${emailSearchTerm(email)}") { edges { node { id, tags } } } }`;
   let customerId = null;
   let currentTags: string[] = [];
   let isExistingCustomer = false;
@@ -213,8 +271,7 @@ export async function removeCustomerProTag(admin: AdminApiContext, idOrEmail: st
     let customerId = idOrEmail.startsWith("gid://") ? idOrEmail : null;
 
     if (!customerId) {
-        const email = cleanEmail(idOrEmail);
-        const q = `query { customers(first: 1, query: "email:${email}") { edges { node { id } } } }`;
+        const q = `query { customers(first: 1, query: "${emailSearchTerm(idOrEmail)}") { edges { node { id } } } }`;
         const r = await admin.graphql(q);
         const d = await r.json() as any;
         customerId = d.data?.customers?.edges?.[0]?.node?.id;

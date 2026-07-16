@@ -6,6 +6,41 @@ export const appConfig = {
 
 const CONFIG_NAMESPACE = "basilic_config";
 
+// --- Helpers internes (shop id + écriture de metafields) ---
+
+async function getShopId(admin: any): Promise<string | null> { // eslint-disable-line @typescript-eslint/no-explicit-any
+  const shopRes = await admin.graphql(`#graphql
+    query GetShopId { shop { id } }
+  `);
+  const shopData = await shopRes.json();
+  return shopData?.data?.shop?.id || null;
+}
+
+async function setShopMetafields(
+  admin: any, // eslint-disable-line @typescript-eslint/no-explicit-any
+  entries: { key: string; type: string; value: string }[],
+): Promise<void> {
+  const shopId = await getShopId(admin);
+  if (!shopId) return;
+
+  const res = await admin.graphql(`#graphql
+    mutation SetShopConfigMetafields($metafields: [MetafieldsSetInput!]!) {
+      metafieldsSet(metafields: $metafields) {
+        userErrors { field message }
+      }
+    }
+  `, {
+    variables: {
+      metafields: entries.map((e) => ({ namespace: CONFIG_NAMESPACE, ownerId: shopId, ...e })),
+    },
+  });
+  const data = await res.json();
+  const userErrors = data?.data?.metafieldsSet?.userErrors;
+  if (userErrors?.length > 0) {
+    console.error("[CONFIG] Erreur metafieldsSet:", userErrors);
+  }
+}
+
 // Lit la config depuis les shop metafields (fallback sur les env vars)
 export async function getShopConfig(admin: any): Promise<{ threshold: number; creditAmount: number }> { // eslint-disable-line @typescript-eslint/no-explicit-any
   try {
@@ -34,30 +69,59 @@ export async function saveShopConfig(
   values: { threshold: number; creditAmount: number }
 ): Promise<void> {
   try {
-    // Récupère le GID du shop
-    const shopRes = await admin.graphql(`#graphql
-      query GetShopId { shop { id } }
-    `);
-    const shopData = await shopRes.json();
-    const shopId = shopData?.data?.shop?.id;
-    if (!shopId) return;
-
-    await admin.graphql(`#graphql
-      mutation SaveShopConfig($metafields: [MetafieldsSetInput!]!) {
-        metafieldsSet(metafields: $metafields) {
-          userErrors { field message }
-        }
-      }
-    `, {
-      variables: {
-        metafields: [
-          { namespace: CONFIG_NAMESPACE, key: "credit_threshold", type: "number_decimal", value: String(values.threshold), ownerId: shopId },
-          { namespace: CONFIG_NAMESPACE, key: "credit_amount", type: "number_decimal", value: String(values.creditAmount), ownerId: shopId },
-        ],
-      },
-    });
+    await setShopMetafields(admin, [
+      { key: "credit_threshold", type: "number_decimal", value: String(values.threshold) },
+      { key: "credit_amount", type: "number_decimal", value: String(values.creditAmount) },
+    ]);
   } catch (e) {
     console.error("Erreur saveShopConfig:", e);
+  }
+}
+
+// --- Date de recalcul globale (Réglage Date) ---
+// Persistée en shop metafield pour que les webhooks (orders/cancelled, refunds/create)
+// appliquent le même filtre de date que les recalculs manuels.
+
+export async function getRecalcFromDate(admin: any): Promise<string | null> { // eslint-disable-line @typescript-eslint/no-explicit-any
+  try {
+    const res = await admin.graphql(`#graphql
+      query GetRecalcFromDate {
+        shop {
+          recalcFromDate: metafield(namespace: "${CONFIG_NAMESPACE}", key: "recalc_from_date") { value }
+        }
+      }
+    `);
+    const data = await res.json();
+    return data?.data?.shop?.recalcFromDate?.value || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveRecalcFromDate(admin: any, date: string | null): Promise<void> { // eslint-disable-line @typescript-eslint/no-explicit-any
+  try {
+    if (date) {
+      await setShopMetafields(admin, [
+        { key: "recalc_from_date", type: "single_line_text_field", value: date },
+      ]);
+    } else {
+      // Effacement : metafieldsSet refuse les valeurs vides → suppression du metafield
+      const shopId = await getShopId(admin);
+      if (!shopId) return;
+      await admin.graphql(`#graphql
+        mutation DeleteRecalcFromDate($metafields: [MetafieldIdentifierInput!]!) {
+          metafieldsDelete(metafields: $metafields) {
+            userErrors { field message }
+          }
+        }
+      `, {
+        variables: {
+          metafields: [{ ownerId: shopId, namespace: CONFIG_NAMESPACE, key: "recalc_from_date" }],
+        },
+      });
+    }
+  } catch (e) {
+    console.error("Erreur saveRecalcFromDate:", e);
   }
 }
 
@@ -99,28 +163,11 @@ export async function saveValidationDefaults(
   values: ValidationDefaults
 ): Promise<void> {
   try {
-    const shopRes = await admin.graphql(`#graphql
-      query GetShopId { shop { id } }
-    `);
-    const shopData = await shopRes.json();
-    const shopId = shopData?.data?.shop?.id;
-    if (!shopId) return;
-
-    await admin.graphql(`#graphql
-      mutation SaveValidationDefaults($metafields: [MetafieldsSetInput!]!) {
-        metafieldsSet(metafields: $metafields) {
-          userErrors { field message }
-        }
-      }
-    `, {
-      variables: {
-        metafields: [
-          { namespace: CONFIG_NAMESPACE, key: "validation_value", type: "number_decimal", value: String(values.value), ownerId: shopId },
-          { namespace: CONFIG_NAMESPACE, key: "validation_type", type: "single_line_text_field", value: values.type, ownerId: shopId },
-          { namespace: CONFIG_NAMESPACE, key: "validation_code_prefix", type: "single_line_text_field", value: values.codePrefix, ownerId: shopId },
-        ],
-      },
-    });
+    await setShopMetafields(admin, [
+      { key: "validation_value", type: "number_decimal", value: String(values.value) },
+      { key: "validation_type", type: "single_line_text_field", value: values.type },
+      { key: "validation_code_prefix", type: "single_line_text_field", value: values.codePrefix },
+    ]);
   } catch (e) {
     console.error("Erreur saveValidationDefaults:", e);
   }

@@ -35,14 +35,14 @@ const EditModeContext = createContext<EditModeContextType | null>(null);
 
 export function EditModeProvider({
   children,
-  adminPassword,
   initialConfig,
   initialValidationDefaults,
+  initialRecalcFromDate,
 }: {
   children: ReactNode;
-  adminPassword?: string;
   initialConfig?: { threshold: number; creditAmount: number };
   initialValidationDefaults?: ValidationDefaults;
+  initialRecalcFromDate?: string | null;
 }) {
   const [isLocked, setIsLockedState] = useState(() => {
     if (typeof window !== "undefined") {
@@ -58,12 +58,8 @@ export function EditModeProvider({
   const [showLimitationBlock, setShowLimitationBlock] = useState(false);
   const [config, setConfigState] = useState(initialConfig ?? { threshold: 500, creditAmount: 10 });
   const [validationDefaults, setValidationDefaultsState] = useState<ValidationDefaults>(initialValidationDefaults ?? { value: 5, type: "%", codePrefix: "PRO_" });
-  const [recalcFromDate, setRecalcFromDateState] = useState<string | null>(() => {
-    if (typeof window !== "undefined") {
-      return localStorage.getItem("basilic_recalculate_from_date") ?? null;
-    }
-    return null;
-  });
+  // Le shop metafield est la seule source de vérité (partagé entre navigateurs + webhooks)
+  const [recalcFromDate, setRecalcFromDateState] = useState<string | null>(initialRecalcFromDate ?? null);
 
   const setIsLocked = useCallback((v: boolean) => {
     setIsLockedState(v);
@@ -80,10 +76,6 @@ export function EditModeProvider({
 
   const setRecalcFromDate = useCallback((v: string | null) => {
     setRecalcFromDateState(v);
-    try {
-      if (v) localStorage.setItem("basilic_recalculate_from_date", v);
-      else localStorage.removeItem("basilic_recalculate_from_date");
-    } catch {}
   }, []);
 
   const [toast, setToast] = useState<ToastData | null>(null);
@@ -99,15 +91,22 @@ export function EditModeProvider({
   }, [toast]);
 
   const handleUnlock = () => {
-    const expectedPassword = adminPassword || "GestionPro";
-    if (password === expectedPassword) {
-      setIsLocked(false);
-      setShowPass(false);
-      setPassword("");
-      setLockError("");
-    } else {
-      setLockError("Code incorrect");
-    }
+    // Vérification côté serveur — le mot de passe n'est jamais exposé au navigateur
+    const fd = new FormData();
+    fd.append("password", password);
+    fetch("/app/api/verify-password", { method: "POST", body: fd })
+      .then((r) => r.json())
+      .then((d: { valid?: boolean }) => {
+        if (d.valid) {
+          setIsLocked(false);
+          setShowPass(false);
+          setPassword("");
+          setLockError("");
+        } else {
+          setLockError("Code incorrect");
+        }
+      })
+      .catch(() => setLockError("Erreur réseau — réessayez"));
   };
 
   return (

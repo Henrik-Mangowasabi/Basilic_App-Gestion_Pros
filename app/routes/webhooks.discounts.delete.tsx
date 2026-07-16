@@ -1,6 +1,7 @@
 import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
-import { getMetaobjectEntries } from "../lib/metaobject.server";
+import { getMetaobjectEntries, updateMetaobjectFields } from "../lib/metaobject.server";
+import { findDiscountIdByCode, codesBeingRecreated } from "../lib/discount.server";
 import {
   removeCustomerProTag,
   deleteCustomerCodePromo,
@@ -32,6 +33,32 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     if (!entry) {
       console.log(`[WEBHOOK] discounts/delete: aucun pro trouvé pour discount ${discountNumericId}`);
       return new Response();
+    }
+
+    // GARDE-FOU : si la suppression vient du flow delete+recreate de l'app
+    // (code déjà pris à l'import, réparation d'un discount), NE PAS supprimer le pro.
+    const entryCodeUpper = (entry.code || "").toUpperCase();
+    if (entryCodeUpper && codesBeingRecreated.has(entryCodeUpper)) {
+      console.log(`[WEBHOOK] discounts/delete: recréation en cours pour "${entry.code}" → pro conservé`);
+      return new Response();
+    }
+
+    // Vérifier si un discount avec le même code existe à nouveau (recréé par l'app
+    // ou manuellement) → resynchroniser le discount_id au lieu de supprimer le pro
+    if (entryCodeUpper) {
+      const recreatedId = await findDiscountIdByCode(admin, entry.code);
+      if (recreatedId) {
+        console.log(`[WEBHOOK] discounts/delete: discount "${entry.code}" existe à nouveau (${recreatedId}) → resync discount_id, pro conservé`);
+        if (recreatedId !== entry.discount_id) {
+          const syncResult = await updateMetaobjectFields(admin, entry.id, [
+            { key: "discount_id", value: recreatedId },
+          ]);
+          if (!syncResult.success) {
+            console.error(`[WEBHOOK] discounts/delete: échec resync discount_id pour ${entry.code} — le pro garde un discount_id mort:`, syncResult.error);
+          }
+        }
+        return new Response();
+      }
     }
 
     console.log(`[WEBHOOK] discounts/delete: suppression pro ${entry.id} (code: ${entry.code})`);

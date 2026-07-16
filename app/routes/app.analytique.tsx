@@ -49,6 +49,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       chartData: [] as { month: string; count: number; ghost?: boolean; key: string }[],
       professionList: [] as string[],
       selectedProfessions: [] as string[],
+      dataTruncated: false,
       shopDomain,
     };
 
@@ -93,6 +94,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   let ranking: any[] = [];
   let chartData: { month: string; count: number; ghost?: boolean; key: string }[] = [];
+  // Passe à true si une limite de pagination est atteinte → les totaux peuvent être incomplets
+  let dataTruncated = false;
   const MONTH_ABBR = ["JAN.","FÉV.","MAR.","AVR.","MAI","JUIN","JUIL.","AOÛ.","SEPT.","OCT.","NOV.","DÉC."];
 
   if (isDateFiltered) {
@@ -126,6 +129,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       const windowBegin = new Date(today.getFullYear(), today.getMonth() - 5, 1);
       const windowBeginStr = `${windowBegin.getFullYear()}-${String(windowBegin.getMonth() + 1).padStart(2, "0")}-01`;
 
+      // Plancher de la requête : si le filtre commence AVANT la fenêtre de 6 mois,
+      // on remonte jusqu'à la date filtrée — sinon les commandes anciennes seraient
+      // silencieusement exclues des totaux et du classement
+      const queryFloorStr = startDateStr && startDateStr < windowBeginStr ? startDateStr : windowBeginStr;
+
       // Pré-remplir les 6 mois : ghost si hors plage filtrée, actif sinon
       for (let i = 5; i >= 0; i--) {
         const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
@@ -142,12 +150,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         const batch = allCodesFiltered.slice(bi, bi + 50);
         const batchSet = new Set(batch);
         const batchCodeFilter = batch.map(c => `discount_code:${c}`).join(" OR ");
-        const extendedQueryString = `created_at:>=${windowBeginStr} -financial_status:refunded -financial_status:voided -status:cancelled AND (${batchCodeFilter})`;
+        const extendedQueryString = `created_at:>=${queryFloorStr} -financial_status:refunded -financial_status:voided -status:cancelled AND (${batchCodeFilter})`;
 
         let hasNextPage = true;
         let cursor = null;
         let pagesLoaded = 0;
-        const maxPages = 4; // 1 000 commandes max par lot
+        const maxPages = 10; // 2 500 commandes max par lot
 
         while (hasNextPage && pagesLoaded < maxPages) {
           const response = await admin.graphql(query, { // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -185,12 +193,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             }
 
             // Chart : commandes du lot courant (ghost + actives)
+            // Seuls les 6 derniers mois sont affichés — les commandes plus anciennes
+            // (récupérées pour les totaux quand le filtre remonte plus loin) sont ignorées ici
             const relevantChartCodes = codesUsed.filter((c: string) => batchSet.has(c.toUpperCase()));
             if (relevantChartCodes.length > 0) {
               const mk = `${createdAt.getFullYear()}-${String(createdAt.getMonth() + 1).padStart(2, "0")}`;
-              const isGhost = filteredMonthlyMap.get(mk)?.ghost ?? !isInFilterRange;
-              const ex = filteredMonthlyMap.get(mk) || { month: MONTH_ABBR[createdAt.getMonth()], count: 0, ghost: isGhost };
-              filteredMonthlyMap.set(mk, { ...ex, count: ex.count + 1 });
+              const ex = filteredMonthlyMap.get(mk);
+              if (ex) filteredMonthlyMap.set(mk, { ...ex, count: ex.count + 1 });
             }
           });
 
@@ -198,6 +207,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           hasNextPage = pageInfo?.hasNextPage;
           cursor = pageInfo?.endCursor;
           pagesLoaded++;
+        }
+        if (hasNextPage && pagesLoaded >= maxPages) {
+          dataTruncated = true;
+          console.warn(`[ANALYTIQUE] ⚠ Lot ${Math.floor(bi / 50) + 1}: limite de ${maxPages * 250} commandes atteinte — totaux filtrés potentiellement incomplets.`);
         }
       }
 
@@ -276,6 +289,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           chartData,
           professionList,
           selectedProfessions,
+          dataTruncated: false,
           shopDomain,
         };
       }
@@ -287,7 +301,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         let hasMore = true;
         let cursor: string | null = null;
         let pages = 0;
-        const maxPages = 8; // 2 000 commandes max par lot
+        const maxPages = 10; // 2 500 commandes max par lot
         while (hasMore && pages < maxPages) {
           const resp = await admin.graphql(liveQuery, { // eslint-disable-line @typescript-eslint/no-explicit-any
             variables: { qs: batchQuery, cursor },
@@ -318,6 +332,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           hasMore = !!mData.data?.orders?.pageInfo?.hasNextPage;
           cursor = mData.data?.orders?.pageInfo?.endCursor ?? null;
           pages++;
+        }
+        if (hasMore && pages >= maxPages) {
+          dataTruncated = true;
+          console.warn(`[ANALYTIQUE] ⚠ Lot ${Math.floor(bi / 50) + 1}: limite de ${maxPages * 250} commandes atteinte — totaux potentiellement incomplets.`);
         }
       }
     } catch (e) {
@@ -355,6 +373,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     chartData,
     professionList,
     selectedProfessions,
+    dataTruncated,
     shopDomain,
   };
 };
@@ -401,7 +420,7 @@ function RankBadge({ rank }: { rank: number }) {
 }
 
 export default function AnalytiquePage() {
-  const { stats, ranking, isInitialized, filters, chartData, professionList, selectedProfessions: initialSelectedProfessions, shopDomain } =
+  const { stats, ranking, isInitialized, filters, chartData, professionList, selectedProfessions: initialSelectedProfessions, dataTruncated, shopDomain } =
     useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const [currentPage, setCurrentPage] = useState(1);
@@ -519,6 +538,31 @@ export default function AnalytiquePage() {
       <div className="page-header">
         <h1 className="page-header__title">Analytique</h1>
       </div>
+
+      {/* === AVERTISSEMENT DONNÉES TRONQUÉES === */}
+      {dataTruncated && (
+        <div
+          role="alert"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+            padding: "10px 14px",
+            marginBottom: "16px",
+            background: "#fffbeb",
+            border: "1px solid #f59e0b",
+            borderRadius: "8px",
+            color: "#92400e",
+            fontSize: "13px",
+          }}
+        >
+          <span aria-hidden="true">⚠️</span>
+          <span>
+            <strong>Données partielles :</strong> le volume de commandes dépasse la limite de lecture —
+            les totaux affichés peuvent être légèrement sous-estimés. Réduisez la période filtrée pour des chiffres exacts.
+          </span>
+        </div>
+      )}
 
       {/* === CARTES STATS === */}
       <div className="an-stats-row">

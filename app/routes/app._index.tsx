@@ -20,12 +20,13 @@ import {
   getMetaobjectEntries,
   createMetaobjectEntry,
   updateMetaobjectEntry,
+  updateMetaobjectFields,
   deleteMetaobjectEntry,
   migrateMetaobjectDefinition,
 } from "../lib/metaobject.server";
-import { createCustomerMetafieldDefinitions, syncRemunerationTag } from "../lib/customer.server";
+import { createCustomerMetafieldDefinitions, syncRemunerationTag, depositStoreCredit } from "../lib/customer.server";
 
-import { getShopConfig, saveShopConfig, getValidationDefaults, saveValidationDefaults } from "../config.server";
+import { getShopConfig, saveShopConfig, getValidationDefaults, saveValidationDefaults, saveRecalcFromDate } from "../config.server";
 import * as XLSX from "xlsx";
 
 export function shouldRevalidate({ formAction, defaultShouldRevalidate }: ShouldRevalidateFunctionArgs) {
@@ -60,7 +61,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }> = [];
 
   if (status.exists) {
-    await migrateMetaobjectDefinition(admin);
+    await migrateMetaobjectDefinition(admin, shopDomain);
     const entriesResult = await getMetaobjectEntries(admin);
     const rawEntries = entriesResult.entries;
 
@@ -231,6 +232,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return { success: "config_saved", threshold, creditAmount };
   }
 
+  if (actionType === "update_recalc_date") {
+    const fromDate = ((formData.get("fromDate") as string) || "").trim();
+    await saveRecalcFromDate(admin, fromDate || null);
+    return { success: "recalc_date_saved" };
+  }
+
   if (actionType === "update_validation_defaults") {
     const value = parseFloat(formData.get("value") as string);
     const type = (formData.get("type") as string) || "%";
@@ -278,17 +285,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const missed = Math.floor(remainder / cfg.threshold);
         const totalCredits = missed * cfg.creditAmount;
         if (missed > 0 && moCustomerId) {
-          try {
-            const rAcc = await admin.graphql(`query($id: ID!) { customer(id: $id) { storeCreditAccounts(first: 1) { edges { node { id } } } } }`, { variables: { id: moCustomerId } });
-            const dAcc = (await rAcc.json()) as any;
-            const accountId = dAcc.data?.customer?.storeCreditAccounts?.edges?.[0]?.node?.id;
-            await admin.graphql(`mutation creditStore($id: ID!, $creditInput: StoreCreditAccountCreditInput!) { storeCreditAccountCredit(id: $id, creditInput: $creditInput) { userErrors { field message } } }`, {
-              variables: { id: accountId || moCustomerId, creditInput: { creditAmount: { amount: String(totalCredits), currencyCode: "EUR" } } },
-            });
-          } catch (e) { console.error("[LIMITATION] Erreur store credit immédiat:", e); }
+          // Même règle que le webhook : on n'avance les compteurs QUE si le virement réussit.
+          // En cas d'échec, l'accumulateur reste intact — la prochaine commande (type illimite)
+          // redéclenchera le versement des paliers en attente.
+          const deposit = await depositStoreCredit(admin, moCustomerId, totalCredits);
+          if (deposit.success) {
+            extraLimitationFields.cache_ca_remainder = String(remainder % cfg.threshold);
+            extraLimitationFields.cache_credit_earned = String(creditEarned + totalCredits);
+          } else {
+            console.error("[LIMITATION] Virement store credit échoué — compteurs inchangés:", deposit.error);
+          }
+        } else if (missed > 0) {
+          // Pas de client à créditer — on avance l'accumulateur sans enregistrer de crédit versé
+          extraLimitationFields.cache_ca_remainder = String(remainder % cfg.threshold);
         }
-        extraLimitationFields.cache_ca_remainder = String(remainder % (cfg.threshold || 500));
-        extraLimitationFields.cache_credit_earned = String(creditEarned + totalCredits);
       }
       if (newRemuType !== "limite_annee" || currentType !== "limite_annee") {
         extraLimitationFields.limitation_date = "";
@@ -569,28 +579,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         const missedCount = Math.floor(currentRemainder / cfg.threshold);
         const totalCredits = missedCount * cfg.creditAmount;
         if (missedCount > 0 && customerId) {
-          try {
-            const queryAccount = `query($id: ID!) { customer(id: $id) { storeCreditAccounts(first: 1) { edges { node { id } } } } }`;
-            const rAcc = await admin.graphql(queryAccount, { variables: { id: customerId } });
-            const dAcc = (await rAcc.json()) as any;
-            const accountId = dAcc.data?.customer?.storeCreditAccounts?.edges?.[0]?.node?.id;
-            const creditTargetId = accountId || customerId;
-            const mutCredit = `mutation creditStore($id: ID!, $creditInput: StoreCreditAccountCreditInput!) {
-              storeCreditAccountCredit(id: $id, creditInput: $creditInput) {
-                storeCreditAccountTransaction { amount { amount currencyCode } }
-                userErrors { field message }
-              }
-            }`;
-            await admin.graphql(mutCredit, {
-              variables: { id: creditTargetId, creditInput: { creditAmount: { amount: String(totalCredits), currencyCode: "EUR" } } },
-            });
-          } catch (creditErr) {
-            console.error("[LIMITATION] Erreur store credit immédiat:", creditErr);
+          // Même règle que le webhook : on n'avance les compteurs QUE si le virement réussit.
+          // En cas d'échec, l'accumulateur reste intact — la prochaine commande (type illimite)
+          // redéclenchera le versement des paliers en attente.
+          const deposit = await depositStoreCredit(admin, customerId, totalCredits);
+          if (deposit.success) {
+            fieldsToUpdate.push({ key: "cache_ca_remainder", value: String(currentRemainder % cfg.threshold) });
+            fieldsToUpdate.push({ key: "cache_credit_earned", value: String(currentCreditEarned + totalCredits) });
+          } else {
+            console.error("[LIMITATION] Virement store credit échoué — compteurs inchangés:", deposit.error);
           }
+        } else if (missedCount > 0) {
+          // Pas de client à créditer — on avance l'accumulateur sans enregistrer de crédit versé
+          fieldsToUpdate.push({ key: "cache_ca_remainder", value: String(currentRemainder % cfg.threshold) });
         }
-        const newRemainder = currentRemainder % (cfg.threshold || 500);
-        fieldsToUpdate.push({ key: "cache_ca_remainder", value: String(newRemainder) });
-        fieldsToUpdate.push({ key: "cache_credit_earned", value: String(currentCreditEarned + totalCredits) });
       }
       fieldsToUpdate.push({ key: "limitation_date", value: "" });
       fieldsToUpdate.push({ key: "limitation_unlock_date", value: "" });
@@ -601,11 +603,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
     }
 
-    const updateMut = `mutation metaobjectUpdate($id: ID!, $metaobject: MetaobjectUpdateInput!) { metaobjectUpdate(id: $id, metaobject: $metaobject) { userErrors { field message } } }`;
-    const ur = await admin.graphql(updateMut, { variables: { id, metaobject: { fields: fieldsToUpdate } } });
-    const ud = (await ur.json()) as any;
-    if (ud.data?.metaobjectUpdate?.userErrors?.length > 0) {
-      return { error: ud.data.metaobjectUpdate.userErrors[0].message };
+    const updateResult = await updateMetaobjectFields(admin, id, fieldsToUpdate);
+    if (!updateResult.success) {
+      return { error: updateResult.error };
     }
     if (customerId) {
       try { await syncRemunerationTag(admin, customerId, newType); } catch {}
@@ -2710,7 +2710,24 @@ export default function Index() {
                             </td>
                             <td className="ui-table__td mf-cell--devmode mf-cell--devmode--blue">
                               <div className="mf-cell mf-cell--center">
-                                <span className="mf-text--title">{Math.max(0, (serverConfig?.threshold ?? 500) - parseFloat((entry as { cache_ca_remainder?: string }).cache_ca_remainder || "0")).toFixed(2)}€</span>
+                                {(() => {
+                                  // Pendant un blocage limite_annee, l'accumulateur dépasse le palier
+                                  // et "0.00€" serait trompeur → on affiche l'état réel
+                                  const remType = (entry as any).remuneration_type || "illimite"; // eslint-disable-line @typescript-eslint/no-explicit-any
+                                  const unlockDate = (entry as any).limitation_unlock_date || ""; // eslint-disable-line @typescript-eslint/no-explicit-any
+                                  const isBlocked = remType === "limite_annee" && !!unlockDate && new Date(unlockDate) > new Date();
+                                  if (remType === "sans_remuneration") {
+                                    return <span className="mf-text--title" style={{ color: "#991b1b", fontSize: "12px" }} title="Aucune rémunération — pas de palier">—</span>;
+                                  }
+                                  if (isBlocked) {
+                                    return (
+                                      <span className="mf-text--title" style={{ color: "#92400e", fontSize: "12px" }} title="Crédits bloqués — le CA accumulé sera pris en compte au déblocage">
+                                        🔒 {new Date(unlockDate).toLocaleDateString("fr-FR")}
+                                      </span>
+                                    );
+                                  }
+                                  return <span className="mf-text--title">{Math.max(0, (serverConfig?.threshold ?? 500) - parseFloat((entry as { cache_ca_remainder?: string }).cache_ca_remainder || "0")).toFixed(2)}€</span>;
+                                })()}
                               </div>
                             </td>
                           </>)}

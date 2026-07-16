@@ -9,7 +9,7 @@ import { authenticate } from "../shopify.server";
 import { ErrorDisplay } from "../components/ErrorDisplay";
 import { NavBar } from "../components/NavBar";
 import { EditModeProvider, useEditMode } from "../context/EditModeContext";
-import { getShopConfig, getValidationDefaults } from "../config.server";
+import { getShopConfig, getValidationDefaults, getRecalcFromDate } from "../config.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
@@ -28,18 +28,19 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   } catch {}
 
   // Charger config + validation defaults dès le root loader
-  const [config, validationDefaults] = await Promise.all([
+  const [config, validationDefaults, recalcFromDate] = await Promise.all([
     getShopConfig(admin),
     getValidationDefaults(admin),
+    getRecalcFromDate(admin),
   ]);
 
   // eslint-disable-next-line no-undef
   return {
     apiKey: process.env.SHOPIFY_API_KEY || "",
-    adminPassword: process.env.ADMIN_PASSWORD || "GestionPro",
     pendingCount,
     config,
     validationDefaults,
+    recalcFromDate,
   };
 };
 
@@ -84,7 +85,7 @@ function AppInner() {
 }
 
 export default function App() {
-  const { apiKey, adminPassword, config, validationDefaults } = useLoaderData<typeof loader>();
+  const { apiKey, config, validationDefaults, recalcFromDate } = useLoaderData<typeof loader>();
   const navigation = useNavigation();
   const [showLoading, setShowLoading] = useState(false);
 
@@ -106,7 +107,7 @@ export default function App() {
           <s-link href="/app/validation">Validation Pros</s-link>
           <s-link href="/app/tutoriel">Tutoriel</s-link>
         </s-app-nav>
-        <EditModeProvider adminPassword={adminPassword} initialConfig={config} initialValidationDefaults={validationDefaults}>
+        <EditModeProvider initialConfig={config} initialValidationDefaults={validationDefaults} initialRecalcFromDate={recalcFromDate}>
           <AppInner />
         </EditModeProvider>
         {showLoading && (

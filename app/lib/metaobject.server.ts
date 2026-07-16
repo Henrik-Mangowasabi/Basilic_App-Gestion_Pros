@@ -40,7 +40,15 @@ export async function checkMetaobjectStatus(admin: AdminApiContext) {
 }
 
 // --- MIGRATION : Ajoute first_name/last_name si manquants dans la définition ---
-export async function migrateMetaobjectDefinition(admin: AdminApiContext) {
+// Ne tourne qu'une fois par shop et par process serveur — inutile de re-vérifier
+// la définition (et de re-muter displayNameKey) à chaque chargement de page.
+const migratedShops = new Set<string>();
+
+export async function migrateMetaobjectDefinition(admin: AdminApiContext, shopDomain?: string) {
+  if (shopDomain) {
+    if (migratedShops.has(shopDomain)) return;
+    migratedShops.add(shopDomain);
+  }
   try {
     // 1. Récupérer la définition et ses champs
     const query = `query {
@@ -84,6 +92,11 @@ export async function migrateMetaobjectDefinition(admin: AdminApiContext) {
     const existingKeys: string[] = defNode.fieldDefinitions.map((f: any) => f.key);
     const toAdd: any[] = [];
 
+    if (!existingKeys.includes("name")) {
+      // Champ legacy écrit par createMetaobjectEntry — requis pour que la création
+      // fonctionne sur une définition recréée (Danger Zone)
+      toAdd.push({ name: "Nom complet", key: "name", type: "single_line_text_field", required: false });
+    }
     if (!existingKeys.includes("first_name")) {
       toAdd.push({ name: "Prénom", key: "first_name", type: "single_line_text_field", required: false });
     }
@@ -160,6 +173,14 @@ export async function createMetaobject(admin: AdminApiContext) {
       key: "identification",
       type: "single_line_text_field",
       required: true,
+    },
+    {
+      // Champ legacy (nom complet) — createMetaobjectEntry l'écrit toujours,
+      // il doit donc exister dans toute définition créée par l'app
+      name: "Nom complet",
+      key: "name",
+      type: "single_line_text_field",
+      required: false,
     },
     {
       name: "Prénom",
@@ -346,6 +367,35 @@ export async function getMetaobjectEntries(admin: AdminApiContext) {
     return { entries: allEntries };
   } catch (error) {
     return { entries: [], error: String(error) };
+  }
+}
+
+// --- UPDATE GÉNÉRIQUE DE CHAMPS ---
+// Point d'entrée unique pour la mutation metaobjectUpdate : gestion d'erreur
+// centralisée (errors GraphQL + userErrors) au lieu de copies inline partout.
+export async function updateMetaobjectFields(
+  admin: AdminApiContext,
+  id: string,
+  fields: { key: string; value: string }[],
+): Promise<{ success: boolean; error?: string }> {
+  const mutation = `mutation metaobjectUpdate($id: ID!, $metaobject: MetaobjectUpdateInput!) {
+    metaobjectUpdate(id: $id, metaobject: $metaobject) {
+      metaobject { id }
+      userErrors { field message }
+    }
+  }`;
+  try {
+    const r = await admin.graphql(mutation, { variables: { id, metaobject: { fields } } });
+    const d = (await r.json()) as any;
+    if (d.errors) {
+      return { success: false, error: d.errors.map((e: any) => e.message).join(", ") };
+    }
+    if (d.data?.metaobjectUpdate?.userErrors?.length > 0) {
+      return { success: false, error: d.data.metaobjectUpdate.userErrors[0].message };
+    }
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: String(e) };
   }
 }
 
@@ -687,19 +737,10 @@ export async function updateMetaobjectEntry(
   if (fields.cache_credit_earned !== undefined)
     fieldsInput.push({ key: "cache_credit_earned", value: String(fields.cache_credit_earned) });
 
-  const mutation = `mutation metaobjectUpdate($id: ID!, $metaobject: MetaobjectUpdateInput!) { metaobjectUpdate(id: $id, metaobject: $metaobject) { userErrors { field message } } }`;
+  const updateResult = await updateMetaobjectFields(admin, id, fieldsInput);
+  if (!updateResult.success) return updateResult;
 
   try {
-    const r = await admin.graphql(mutation, {
-      variables: { id, metaobject: { fields: fieldsInput } },
-    });
-    const d = (await r.json()) as any;
-    if (d.data?.metaobjectUpdate?.userErrors?.length > 0)
-      return {
-        success: false,
-        error: d.data.metaobjectUpdate.userErrors[0].message,
-      };
-
     // Mise à jour metafields client si nécessaire
     if (oldData.customer_id) {
       const metafieldsToUpdate: { namespace: string; key: string; value: string; type: string }[] = [];

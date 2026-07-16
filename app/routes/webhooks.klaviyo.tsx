@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { timingSafeEqual } from "crypto";
 import { unauthenticated } from "../shopify.server";
+import { timingSafeStringEqual } from "../lib/security.server";
 
 // GET : test de connectivité Klaviyo
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -11,25 +11,13 @@ export const loader = async (_args: LoaderFunctionArgs) => {
   });
 };
 
-function verifySecret(provided: string, expected: string): boolean {
-  if (!provided || !expected) return false;
-  try {
-    const a = Buffer.from(provided);
-    const b = Buffer.from(expected);
-    if (a.length !== b.length) return false;
-    return timingSafeEqual(a, b);
-  } catch {
-    return false;
-  }
-}
-
 export const action = async ({ request }: ActionFunctionArgs) => {
   const url = new URL(request.url);
 
   // Sécurité : secret partagé dans l'URL (?secret=...)
   const providedSecret = url.searchParams.get("secret") || "";
   const expectedSecret = process.env.KLAVIYO_WEBHOOK_SECRET || "";
-  if (!verifySecret(providedSecret, expectedSecret)) {
+  if (!timingSafeStringEqual(providedSecret, expectedSecret)) {
     console.warn("Klaviyo webhook: secret invalide");
     return new Response("Unauthorized", { status: 401 });
   }
@@ -85,7 +73,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           }
         }
       }
-    `, { variables: { query: `email:${email}` } });
+    `, { variables: { query: `email:"${email.replace(/["\\]/g, "")}"` } });
 
     const customerData = await customerResp.json() as any; // eslint-disable-line @typescript-eslint/no-explicit-any
     const customer = customerData.data?.customers?.edges?.[0]?.node;

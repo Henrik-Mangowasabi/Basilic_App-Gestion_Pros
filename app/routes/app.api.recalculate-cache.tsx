@@ -1,6 +1,7 @@
 import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
 import { updateCustomerProMetafields } from "../lib/customer.server";
+import { updateMetaobjectFields } from "../lib/metaobject.server";
 import { queryAllOrdersForCode } from "../lib/orders.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -40,32 +41,57 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         let restUrl = `https://${session.shop}/admin/api/2025-10/orders.json?discount_code=${encodeURIComponent(codeUpper)}&status=any&limit=250&fields=id,name,created_at,discount_codes,subtotal_price,financial_status,cancel_reason,refunds`;
         if (fromDate) restUrl += `&created_at_min=${encodeURIComponent(fromDate + "T00:00:00")}`;
 
-        const restResp = await fetch(restUrl, {
-          headers: {
-            "X-Shopify-Access-Token": session.accessToken!,
-            "Content-Type": "application/json",
-          },
-        });
-        const restData = await restResp.json() as any;
-        const restOrders = restData.orders || [];
-        console.log(`[REST API] ${codeUpper}: ${restOrders.length} commandes brutes`);
+        // Pagination via Link header (rel="next") — un pro peut avoir >250 commandes
+        let pageUrl: string | null = restUrl;
+        let pagesFetched = 0;
+        const MAX_REST_PAGES = 20; // 5 000 commandes max
 
-        for (const o of restOrders) {
-          if (o.financial_status === "refunded" || o.financial_status === "voided" || o.cancel_reason) continue;
-          const subtotal = parseFloat(o.subtotal_price || "0");
-          let productRefunded = 0;
-          for (const refund of o.refunds || []) {
-            for (const ri of refund.refund_line_items || []) {
-              productRefunded += parseFloat(ri.subtotal || "0");
-            }
+        while (pageUrl && pagesFetched < MAX_REST_PAGES) {
+          const restResp: Response = await fetch(pageUrl, {
+            headers: {
+              "X-Shopify-Access-Token": session.accessToken!,
+              "Content-Type": "application/json",
+            },
+          });
+          // fetch ne rejette pas sur un statut HTTP d'erreur (401, 429...) — sans ce check,
+          // une réponse d'erreur donnerait 0 commandes et écraserait le cache à 0€
+          if (!restResp.ok) {
+            throw new Error(`REST API HTTP ${restResp.status}`);
           }
-          restRevenue += Math.max(0, subtotal - productRefunded);
-          restCount++;
-          console.log(`[REST API] ✓ ${o.name} (${o.created_at?.slice(0,10)}) subtotal=${o.subtotal_price}`);
+          const restData = await restResp.json() as any;
+          const restOrders = restData.orders || [];
+          console.log(`[REST API] ${codeUpper}: ${restOrders.length} commandes brutes (page ${pagesFetched + 1})`);
+
+          for (const o of restOrders) {
+            if (o.financial_status === "refunded" || o.financial_status === "voided" || o.cancel_reason) continue;
+            const subtotal = parseFloat(o.subtotal_price || "0");
+            let productRefunded = 0;
+            for (const refund of o.refunds || []) {
+              for (const ri of refund.refund_line_items || []) {
+                // subtotal + total_tax = montant produit TTC remboursé — même base que le
+                // calcul GraphQL (totalRefunded − shipping), sinon les deux recalculs divergent
+                productRefunded += parseFloat(ri.subtotal || "0") + parseFloat(ri.total_tax || "0");
+              }
+            }
+            restRevenue += Math.max(0, subtotal - productRefunded);
+            restCount++;
+          }
+
+          const linkHeader = restResp.headers.get("link") || "";
+          const nextMatch = linkHeader.match(/<([^>]+)>;\s*rel="next"/);
+          pageUrl = nextMatch ? nextMatch[1] : null;
+          pagesFetched++;
         }
+
+        if (pageUrl) {
+          console.warn(`[REST API] ⚠ ${codeUpper}: limite de ${MAX_REST_PAGES * 250} commandes atteinte — résultats potentiellement incomplets.`);
+        }
+
         console.log(`[REST API] Résultat: ${restCount} commandes valides, CA=${restRevenue.toFixed(2)}€`);
         restSuccess = true;
       } catch (restErr) {
+        // restSuccess reste false → les compteurs partiels ne sont jamais lus,
+        // le fallback GraphQL prend le relais
         console.warn(`[REST API] Erreur, fallback scan complet:`, restErr);
       }
 
@@ -89,30 +115,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   // On met à jour UNIQUEMENT le CA et le nombre de commandes.
   // cache_credit_earned et cache_ca_remainder ne sont PAS recalculés :
   // on ne connaît pas l'historique des paliers/versements précédents.
-  const updateResponse = await admin.graphql(`#graphql
-    mutation metaobjectUpdate($id: ID!, $metaobject: MetaobjectUpdateInput!) {
-      metaobjectUpdate(id: $id, metaobject: $metaobject) {
-        metaobject { id }
-        userErrors { field message }
-      }
-    }
-  `, {
-    variables: {
-      id: metaobjectId,
-      metaobject: {
-        fields: [
-          { key: "cache_revenue", value: String(totalRevenue) },
-          { key: "cache_orders_count", value: String(totalOrders) },
-        ],
-      },
-    },
-  });
-
-  const updateData = await updateResponse.json() as any;
-  if (updateData.errors || updateData.data?.metaobjectUpdate?.userErrors?.length > 0) {
+  const updateResult = await updateMetaobjectFields(admin, metaobjectId, [
+    { key: "cache_revenue", value: String(totalRevenue) },
+    { key: "cache_orders_count", value: String(totalOrders) },
+  ]);
+  if (!updateResult.success) {
     return new Response(JSON.stringify({
       error: "Erreur mise à jour metaobject",
-      details: updateData.errors || updateData.data?.metaobjectUpdate?.userErrors,
+      details: updateResult.error,
     }), {
       headers: { "Content-Type": "application/json" },
     });

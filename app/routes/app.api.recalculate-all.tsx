@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs } from "react-router";
 import { authenticate } from "../shopify.server";
-import { getMetaobjectEntries } from "../lib/metaobject.server";
+import { getMetaobjectEntries, updateMetaobjectFields } from "../lib/metaobject.server";
 import { queryOrderStatsByCodeBatches } from "../lib/orders.server";
 import { updateCustomerProMetafields } from "../lib/customer.server";
 
@@ -53,28 +53,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
             try {
               // Update MO cache
-              const r = await admin.graphql(`#graphql
-                mutation metaobjectUpdate($id: ID!, $metaobject: MetaobjectUpdateInput!) {
-                  metaobjectUpdate(id: $id, metaobject: $metaobject) {
-                    metaobject { id }
-                    userErrors { field message }
-                  }
-                }
-              `, {
-                variables: {
-                  id: entry.id,
-                  metaobject: {
-                    fields: [
-                      { key: "cache_revenue", value: String(totalRevenue) },
-                      { key: "cache_orders_count", value: String(totalOrders) },
-                    ],
-                  },
-                },
-              });
-              const d = await r.json() as any;
-              if (d.data?.metaobjectUpdate?.userErrors?.length > 0) {
+              const updateResult = await updateMetaobjectFields(admin, entry.id, [
+                { key: "cache_revenue", value: String(totalRevenue) },
+                { key: "cache_orders_count", value: String(totalOrders) },
+              ]);
+              if (!updateResult.success) {
                 const name = [entry.first_name, entry.last_name].filter(Boolean).join(" ") || "?";
-                errors.push(`${name}: ${d.data.metaobjectUpdate.userErrors[0].message}`);
+                errors.push(`${name}: ${updateResult.error}`);
                 return;
               }
 
