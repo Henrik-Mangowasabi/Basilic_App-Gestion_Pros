@@ -20,6 +20,9 @@ export function computeCreditsForOrder(params: {
   orderAmount: number;
   threshold: number;
   creditAmount: number;
+  /** Loi anti-cadeaux : montant du bon annuel des professions réglementées (limite_annee).
+   *  Fallback sur creditAmount si absent. */
+  regulatedCreditAmount?: number;
   now?: Date; // injectable pour les tests
 }): CreditComputation {
   const {
@@ -30,6 +33,7 @@ export function computeCreditsForOrder(params: {
     threshold,
     creditAmount,
   } = params;
+  const regulatedAmount = params.regulatedCreditAmount ?? creditAmount;
   const now = params.now ?? new Date();
 
   const accumulated = currentRemainder + orderAmount;
@@ -44,8 +48,9 @@ export function computeCreditsForOrder(params: {
   } else if (remunerationType === "limite_annee") {
     const isBlocked = !!limitationUnlockDate && new Date(limitationUnlockDate) > now;
     if (!isBlocked && potentialRemainder >= threshold) {
-      // Non bloqué : 1 seul crédit max si le palier est franchi
-      creditsToAdd = creditAmount;
+      // Non bloqué : 1 seul crédit max si le palier est franchi,
+      // au montant réglementé (plafond annuel loi anti-cadeaux)
+      creditsToAdd = regulatedAmount;
       potentialRemainder -= threshold; // soustraction unique
       // Dates de blocage (appliquées uniquement si le virement réussit)
       const unlock = new Date(now);

@@ -2,6 +2,14 @@
 export const appConfig = {
   threshold: parseFloat(process.env.CREDIT_THRESHOLD || "500"),
   creditAmount: parseFloat(process.env.CREDIT_AMOUNT || "10"),
+  // Loi anti-cadeaux : plafond annuel pour les professions réglementées (statut "Limité annuel")
+  regulatedCreditAmount: parseFloat(process.env.REGULATED_CREDIT_AMOUNT || "60"),
+};
+
+export type ShopConfig = {
+  threshold: number;
+  creditAmount: number;
+  regulatedCreditAmount: number;
 };
 
 const CONFIG_NAMESPACE = "basilic_config";
@@ -42,13 +50,14 @@ async function setShopMetafields(
 }
 
 // Lit la config depuis les shop metafields (fallback sur les env vars)
-export async function getShopConfig(admin: any): Promise<{ threshold: number; creditAmount: number }> { // eslint-disable-line @typescript-eslint/no-explicit-any
+export async function getShopConfig(admin: any): Promise<ShopConfig> { // eslint-disable-line @typescript-eslint/no-explicit-any
   try {
     const res = await admin.graphql(`#graphql
       query GetShopConfig {
         shop {
           threshold: metafield(namespace: "${CONFIG_NAMESPACE}", key: "credit_threshold") { value }
           creditAmount: metafield(namespace: "${CONFIG_NAMESPACE}", key: "credit_amount") { value }
+          regulatedCreditAmount: metafield(namespace: "${CONFIG_NAMESPACE}", key: "regulated_credit_amount") { value }
         }
       }
     `);
@@ -57,6 +66,7 @@ export async function getShopConfig(admin: any): Promise<{ threshold: number; cr
     return {
       threshold: shop?.threshold?.value ? parseFloat(shop.threshold.value) : appConfig.threshold,
       creditAmount: shop?.creditAmount?.value ? parseFloat(shop.creditAmount.value) : appConfig.creditAmount,
+      regulatedCreditAmount: shop?.regulatedCreditAmount?.value ? parseFloat(shop.regulatedCreditAmount.value) : appConfig.regulatedCreditAmount,
     };
   } catch {
     return appConfig;
@@ -66,12 +76,13 @@ export async function getShopConfig(admin: any): Promise<{ threshold: number; cr
 // Sauvegarde la config dans les shop metafields
 export async function saveShopConfig(
   admin: any, // eslint-disable-line @typescript-eslint/no-explicit-any
-  values: { threshold: number; creditAmount: number }
+  values: ShopConfig
 ): Promise<void> {
   try {
     await setShopMetafields(admin, [
       { key: "credit_threshold", type: "number_decimal", value: String(values.threshold) },
       { key: "credit_amount", type: "number_decimal", value: String(values.creditAmount) },
+      { key: "regulated_credit_amount", type: "number_decimal", value: String(values.regulatedCreditAmount) },
     ]);
   } catch (e) {
     console.error("Erreur saveShopConfig:", e);

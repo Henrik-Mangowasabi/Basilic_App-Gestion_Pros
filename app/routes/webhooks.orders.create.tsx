@@ -29,7 +29,7 @@ export const loader = async (_args: LoaderFunctionArgs) => {
  */
 async function processEarnForCode(
   adminContext: any,
-  config: { threshold: number; creditAmount: number },
+  config: { threshold: number; creditAmount: number; regulatedCreditAmount: number },
   order: any,
   usedCode: string,
   orderAmount: number,
@@ -145,6 +145,7 @@ async function processEarnForCode(
     orderAmount,
     threshold: config.threshold,
     creditAmount: config.creditAmount,
+    regulatedCreditAmount: config.regulatedCreditAmount,
   });
 
   // 5. Virement du crédit (si palier franchi)

@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 
 export type ToastData = { title: string; msg: string; type: "success" | "error" | "info" };
 export type ValidationDefaults = { value: number; type: string; codePrefix: string };
+export type CreditConfig = { threshold: number; creditAmount: number; regulatedCreditAmount: number };
 
 type EditModeContextType = {
   isLocked: boolean;
@@ -20,8 +21,8 @@ type EditModeContextType = {
   setShowCABlock: (v: boolean) => void;
   showLimitationBlock: boolean;
   setShowLimitationBlock: (v: boolean) => void;
-  config: { threshold: number; creditAmount: number };
-  setConfig: (v: { threshold: number; creditAmount: number }) => void;
+  config: CreditConfig;
+  setConfig: (v: CreditConfig) => void;
   validationDefaults: ValidationDefaults;
   setValidationDefaults: (v: ValidationDefaults) => void;
   toast: ToastData | null;
@@ -40,7 +41,7 @@ export function EditModeProvider({
   initialRecalcFromDate,
 }: {
   children: ReactNode;
-  initialConfig?: { threshold: number; creditAmount: number };
+  initialConfig?: CreditConfig;
   initialValidationDefaults?: ValidationDefaults;
   initialRecalcFromDate?: string | null;
 }) {
@@ -56,7 +57,7 @@ export function EditModeProvider({
   const [showCodeBlock, setShowCodeBlock] = useState(true);
   const [showCABlock, setShowCABlock] = useState(false);
   const [showLimitationBlock, setShowLimitationBlock] = useState(false);
-  const [config, setConfigState] = useState(initialConfig ?? { threshold: 500, creditAmount: 10 });
+  const [config, setConfigState] = useState<CreditConfig>(initialConfig ?? { threshold: 500, creditAmount: 10, regulatedCreditAmount: 60 });
   const [validationDefaults, setValidationDefaultsState] = useState<ValidationDefaults>(initialValidationDefaults ?? { value: 5, type: "%", codePrefix: "PRO_" });
   // Le shop metafield est la seule source de vérité (partagé entre navigateurs + webhooks)
   const [recalcFromDate, setRecalcFromDateState] = useState<string | null>(initialRecalcFromDate ?? null);
@@ -66,7 +67,7 @@ export function EditModeProvider({
     try { sessionStorage.setItem("basilic_unlocked", v ? "0" : "1"); } catch {}
   }, []);
 
-  const setConfig = useCallback((v: { threshold: number; creditAmount: number }) => {
+  const setConfig = useCallback((v: CreditConfig) => {
     setConfigState(v);
   }, []);
 

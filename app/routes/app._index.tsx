@@ -225,11 +225,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (actionType === "update_config") {
     const threshold = parseFloat(formData.get("threshold") as string);
     const creditAmount = parseFloat(formData.get("creditAmount") as string);
-    if (isNaN(threshold) || isNaN(creditAmount) || threshold <= 0 || creditAmount <= 0) {
-      return { error: "Valeurs invalides pour le seuil ou le montant de crédit." };
+    const regulatedCreditAmount = parseFloat(formData.get("regulatedCreditAmount") as string);
+    if (isNaN(threshold) || isNaN(creditAmount) || isNaN(regulatedCreditAmount) || threshold <= 0 || creditAmount <= 0 || regulatedCreditAmount <= 0) {
+      return { error: "Valeurs invalides pour le seuil ou les montants de crédit." };
     }
-    await saveShopConfig(admin, { threshold, creditAmount });
-    return { success: "config_saved", threshold, creditAmount };
+    await saveShopConfig(admin, { threshold, creditAmount, regulatedCreditAmount });
+    return { success: "config_saved", threshold, creditAmount, regulatedCreditAmount };
   }
 
   if (actionType === "update_recalc_date") {
@@ -1334,6 +1335,12 @@ function RecalculateCreditsSingleModal({ entry, onClose, onDone }: { entry: any;
   const currentRemainder = parseFloat(entry.cache_ca_remainder || "0");
   const { threshold, creditAmount } = config;
 
+  // Le recalcul par paliers (creditAmount × ⌊CA/seuil⌋) n'a de sens que pour les
+  // pros illimités — pour un réglementé (limite_annee) il déposerait bien au-delà
+  // du plafond annuel de la loi anti-cadeaux
+  const remType = entry.remuneration_type || "illimite";
+  const isIllimite = remType === "illimite";
+
   const expectedCrossings = Math.floor(totalCA / threshold);
   const expectedCreditEarned = expectedCrossings * creditAmount;
   const expectedRemainder = Math.round((totalCA - expectedCrossings * threshold) * 100) / 100;
@@ -1368,7 +1375,7 @@ function RecalculateCreditsSingleModal({ entry, onClose, onDone }: { entry: any;
     }
   };
 
-  const btnDisabled = loading || isLocked || nothingToDo || overCredited;
+  const btnDisabled = loading || isLocked || nothingToDo || overCredited || !isIllimite;
   const btnStyle = {
     background: btnDisabled ? "var(--color-gray-300)" : "#008060",
     cursor: btnDisabled ? "not-allowed" : "pointer",
@@ -1424,6 +1431,12 @@ function RecalculateCreditsSingleModal({ entry, onClose, onDone }: { entry: any;
                 </tbody>
               </table>
 
+              {!isIllimite && (
+                <p style={{ fontSize: "13px", color: "#92400e", padding: "8px 10px", background: "#fffbeb", border: "1px solid #f59e0b", borderRadius: "6px", margin: 0 }}>
+                  ⚠️ Ce pro est en rémunération <strong>{remType === "limite_annee" ? "limitée (annuelle)" : "sans rémunération"}</strong> —
+                  le recalcul par paliers est réservé aux pros illimités (il déposerait au-delà du plafond réglementaire).
+                </p>
+              )}
               {overCredited && (
                 <p style={{ fontSize: "13px", color: "#d82c0d", padding: "8px 10px", background: "#fdf0f0", borderRadius: "6px", margin: 0 }}>
                   Les crédits enregistrés ({creditEarned}€) dépassent les crédits attendus ({expectedCreditEarned}€) — correction manuelle nécessaire.
@@ -1452,7 +1465,7 @@ function RecalculateCreditsSingleModal({ entry, onClose, onDone }: { entry: any;
           <button type="button" onClick={done ? onDone : onClose} disabled={loading} className="bsl-modal__btn bsl-modal__btn--cancel">
             {done ? "Fermer" : "Annuler"}
           </button>
-          {!done && !overCredited && (
+          {!done && !overCredited && isIllimite && (
             <button type="button" onClick={handleApply} disabled={btnDisabled} className="bsl-modal__btn bsl-modal__btn--primary" style={btnStyle}>
               {loading
                 ? <><Spinner /> Traitement...</>
@@ -2095,7 +2108,11 @@ export default function Index() {
   // Synchroniser le config serveur vers le context client (au chargement de la page)
   useEffect(() => {
     if (serverConfig && serverConfig.threshold && serverConfig.creditAmount) {
-      setConfig({ threshold: serverConfig.threshold, creditAmount: serverConfig.creditAmount });
+      setConfig({
+        threshold: serverConfig.threshold,
+        creditAmount: serverConfig.creditAmount,
+        regulatedCreditAmount: (serverConfig as { regulatedCreditAmount?: number }).regulatedCreditAmount ?? 60,
+      });
     }
   }, [serverConfig?.threshold, serverConfig?.creditAmount]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -2514,7 +2531,7 @@ export default function Index() {
               {showCABlock && badgeLeft !== null && <div className="block-badge block-badge--blue" style={{ left: `${badgeLeft.ca}px` }}><svg width="10" height="10" viewBox="0 0 20 20" fill="currentColor"><path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zm6-4a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zm6-3a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z" /></svg> Chiffre d&apos;Affaires</div>}
               {showLimitationBlock && badgeLeft !== null && <div className="block-badge" style={{ left: `${badgeLeft.limitation}px`, backgroundColor: "rgb(255, 251, 235)", color: "#92400e" }}><svg width="10" height="10" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" /></svg> Limitation</div>}
               <div ref={tableScrollRef} className="table-scroll">
-              <table className="ui-table" style={{ tableLayout: "fixed", width: "100%", minWidth: `${(showCodeBlock || showCABlock || showLimitationBlock ? 272 : 532) + (showCodeBlock ? 550 : 0) + (showCABlock ? 550 : 0) + (showLimitationBlock ? 460 : 0)}px` }}>
+              <table className="ui-table" style={{ tableLayout: "fixed", width: "100%", minWidth: `${(showCodeBlock || showCABlock || showLimitationBlock ? 412 : 532) + (showCodeBlock ? 550 : 0) + (showCABlock ? 550 : 0) + (showLimitationBlock ? 460 : 0)}px` }}>
                 <colgroup>
                   <col style={{ width: "40px" }} />
                   <col />
@@ -2594,9 +2611,9 @@ export default function Index() {
                           <td className="ui-table__td ui-table__td--checkbox" >
                             <input type="checkbox" className="ui-checkbox__input" checked={isSelected} onChange={() => toggleSelectOne(entry.id)} />
                           </td>
-                          <td className="ui-table__td">
+                          <td className="ui-table__td" style={{ overflow: "hidden" }}>
                             <div className="mf-cell mf-cell--multi">
-                                <span className="mf-text--title">{nom}</span>
+                                <span className="mf-text--title" title={nom} style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{nom}</span>
                             </div>
                           </td>
                           {!(showCodeBlock || showCABlock || showLimitationBlock) && (
@@ -2613,9 +2630,9 @@ export default function Index() {
                             </div>
                           </td>
                           )}
-                          <td className="ui-table__td">
+                          <td className="ui-table__td" style={{ overflow: "hidden" }}>
                             <div className="mf-cell mf-cell--start">
-                              <span className="mf-text--title">{(entry as { profession?: string }).profession || "—"}</span>
+                              <span className="mf-text--title" title={(entry as { profession?: string }).profession || undefined} style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{(entry as { profession?: string }).profession || "—"}</span>
                             </div>
                           </td>
                           {!(showCodeBlock || showCABlock || showLimitationBlock) && (

@@ -143,6 +143,7 @@ export function NavBar() {
   const [showConfigPanel, setShowConfigPanel] = useState(false);
   const [localThreshold, setLocalThreshold] = useState(config.threshold);
   const [localCreditAmount, setLocalCreditAmount] = useState(config.creditAmount);
+  const [localRegulatedAmount, setLocalRegulatedAmount] = useState(config.regulatedCreditAmount);
 
   // Validation defaults
   const [showValidationPanel, setShowValidationPanel] = useState(false);
@@ -164,24 +165,30 @@ export function NavBar() {
   useEffect(() => {
     setLocalThreshold(config.threshold);
     setLocalCreditAmount(config.creditAmount);
-  }, [config.threshold, config.creditAmount]);
+    setLocalRegulatedAmount(config.regulatedCreditAmount);
+  }, [config.threshold, config.creditAmount, config.regulatedCreditAmount]);
 
   const handleSaveConfig = (e: { preventDefault: () => void }) => {
     e.preventDefault();
 
     // Mise à jour immédiate côté client pour feedback instantané
-    setConfig({ threshold: localThreshold, creditAmount: localCreditAmount });
+    setConfig({ threshold: localThreshold, creditAmount: localCreditAmount, regulatedCreditAmount: localRegulatedAmount });
     setShowConfigPanel(false);
 
     // Sauvegarder côté serveur via fetcher (auth Shopify correcte)
     fetcher.submit(
-      { action: "update_config", threshold: String(localThreshold), creditAmount: String(localCreditAmount) },
+      {
+        action: "update_config",
+        threshold: String(localThreshold),
+        creditAmount: String(localCreditAmount),
+        regulatedCreditAmount: String(localRegulatedAmount),
+      },
       { method: "POST", action: "/app?index" }
     );
 
     showToast({
       title: "Réglages sauvegardés",
-      msg: `${localCreditAmount}€ tous les ${localThreshold}€ de CA.`,
+      msg: `${localCreditAmount}€ tous les ${localThreshold}€ · ${localRegulatedAmount}€/an réglementé.`,
       type: "success"
     });
   };
@@ -412,7 +419,7 @@ export function NavBar() {
             {config.creditAmount}€ tous les {config.threshold}€ de CA généré
           </span>
           <span className="sidebar-settings-info">
-            Bloqué = palier atteint, crédits versés · Règle unique pour tous
+            Réglementé (limité annuel) : {config.regulatedCreditAmount}€ max/an
           </span>
 
           {showConfigPanel && !isLocked && (
@@ -436,6 +443,19 @@ export function NavBar() {
                     type="number"
                     value={localCreditAmount}
                     onChange={(e) => setLocalCreditAmount(parseFloat(e.target.value) || 0)}
+                    step="0.01"
+                    className="sidebar-lock-input"
+                  />
+                </div>
+              </div>
+              <div className="sidebar-settings-row">
+                <div className="sidebar-settings-field">
+                  <label htmlFor="sb-regulated" className="sidebar-settings-label" title="Loi anti-cadeaux : bon annuel unique versé aux pros en statut Limité (annuel)">Réglementé (€/an)</label>
+                  <input
+                    id="sb-regulated"
+                    type="number"
+                    value={localRegulatedAmount}
+                    onChange={(e) => setLocalRegulatedAmount(parseFloat(e.target.value) || 0)}
                     step="0.01"
                     className="sidebar-lock-input"
                   />
