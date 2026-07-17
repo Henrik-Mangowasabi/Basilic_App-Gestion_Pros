@@ -32,3 +32,5 @@ database.sqlite
 mcp_packages.txt
 nul
 json.txt
+text.json
+partenaires_*.xlsx
