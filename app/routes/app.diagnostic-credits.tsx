@@ -20,7 +20,7 @@ const DEFAULT_APP_DATE = "2026-03-03";
  *   /app/diagnostic-credits?appDate=2026-01-15       → autre date de référence
  */
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { admin } = await authenticate.admin(request);
+  const { admin, session } = await authenticate.admin(request);
   const url = new URL(request.url);
 
   const codesParam = (url.searchParams.get("codes") || "").trim();
@@ -28,6 +28,112 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     ? new Set(codesParam.split(",").map((c) => c.trim().toUpperCase()).filter(Boolean))
     : null;
   const appDate = (url.searchParams.get("appDate") || DEFAULT_APP_DATE).trim();
+
+  // ── MODE COMPARAISON ── ?compare=CODE : liste les commandes d'un code vues par
+  // les DEUX moteurs (REST vs GraphQL) et isole celles qui diffèrent — pour expliquer
+  // un écart de CA commande par commande.
+  const compareCode = (url.searchParams.get("compare") || "").trim().toUpperCase();
+  if (compareCode) {
+    const r2 = (n: number) => Math.round(n * 100) / 100;
+
+    // Moteur REST (celui du « Recalculer le CA » individuel)
+    const restOrders: { name: string; date: string; montant: number; statut: string }[] = [];
+    let pageUrl: string | null =
+      `https://${session.shop}/admin/api/2025-10/orders.json?discount_code=${encodeURIComponent(compareCode)}&status=any&limit=250&fields=id,name,created_at,discount_codes,subtotal_price,financial_status,cancel_reason,refunds&created_at_min=${encodeURIComponent(appDate + "T00:00:00")}`;
+    let restPages = 0;
+    while (pageUrl && restPages < 20) {
+      const resp: Response = await fetch(pageUrl, {
+        headers: { "X-Shopify-Access-Token": session.accessToken!, "Content-Type": "application/json" },
+      });
+      if (!resp.ok) throw new Error(`REST HTTP ${resp.status}`);
+      const data = (await resp.json()) as any;
+      for (const o of data.orders || []) {
+        if (o.financial_status === "refunded" || o.financial_status === "voided" || o.cancel_reason) continue;
+        let productRefunded = 0;
+        for (const refund of o.refunds || []) {
+          for (const ri of refund.refund_line_items || []) {
+            productRefunded += parseFloat(ri.subtotal || "0") + parseFloat(ri.total_tax || "0");
+          }
+        }
+        restOrders.push({
+          name: o.name,
+          date: (o.created_at || "").slice(0, 10),
+          montant: r2(Math.max(0, parseFloat(o.subtotal_price || "0") - productRefunded)),
+          statut: o.financial_status,
+        });
+      }
+      const link = resp.headers.get("link") || "";
+      const next = link.match(/<([^>]+)>;\s*rel="next"/);
+      pageUrl = next ? next[1] : null;
+      restPages++;
+    }
+
+    // Moteur GraphQL (celui du diagnostic et du recalcul global)
+    const gqlOrders: { name: string; date: string; montant: number }[] = [];
+    let cursor: string | null = null;
+    let hasMore = true;
+    let gqlPages = 0;
+    while (hasMore && gqlPages < 20) {
+      const r = await admin.graphql(`#graphql
+        query compareOrders($qs: String!, $cursor: String) {
+          orders(first: 250, query: $qs, after: $cursor) {
+            edges {
+              node {
+                name
+                createdAt
+                subtotalPriceSet { shopMoney { amount } }
+                totalRefundedSet { shopMoney { amount } }
+                totalRefundedShippingSet { shopMoney { amount } }
+                discountCodes
+              }
+            }
+            pageInfo { hasNextPage endCursor }
+          }
+        }
+      `, {
+        variables: {
+          qs: `created_at:>="${appDate}" -financial_status:refunded -financial_status:voided -status:cancelled discount_code:${compareCode}`,
+          cursor,
+        },
+      });
+      const dd = (await r.json()) as any;
+      for (const e of dd.data?.orders?.edges || []) {
+        const n = e.node;
+        const codes = (n.discountCodes || []).map((c: string) => c.toUpperCase());
+        if (!codes.includes(compareCode)) continue;
+        const sub = parseFloat(n.subtotalPriceSet?.shopMoney?.amount || "0");
+        const tr = parseFloat(n.totalRefundedSet?.shopMoney?.amount || "0");
+        const sr = parseFloat(n.totalRefundedShippingSet?.shopMoney?.amount || "0");
+        gqlOrders.push({
+          name: n.name,
+          date: (n.createdAt || "").slice(0, 10),
+          montant: r2(Math.max(0, sub - Math.max(0, tr - sr))),
+        });
+      }
+      hasMore = dd.data?.orders?.pageInfo?.hasNextPage ?? false;
+      cursor = dd.data?.orders?.pageInfo?.endCursor ?? null;
+      gqlPages++;
+    }
+
+    const restByName = new Map(restOrders.map((o) => [o.name, o]));
+    const gqlByName = new Map(gqlOrders.map((o) => [o.name, o]));
+
+    return {
+      mode: "comparaison",
+      code: compareCode,
+      depuis: appDate,
+      rest: { nb: restOrders.length, total: r2(restOrders.reduce((s, o) => s + o.montant, 0)) },
+      graphql: { nb: gqlOrders.length, total: r2(gqlOrders.reduce((s, o) => s + o.montant, 0)) },
+      ecarts: {
+        vues_seulement_par_graphql: gqlOrders.filter((o) => !restByName.has(o.name)),
+        vues_seulement_par_rest: restOrders.filter((o) => !gqlByName.has(o.name)),
+        montants_differents: restOrders
+          .filter((o) => gqlByName.has(o.name) && Math.abs(gqlByName.get(o.name)!.montant - o.montant) > 0.01)
+          .map((o) => ({ name: o.name, date: o.date, rest: o.montant, graphql: gqlByName.get(o.name)!.montant, ecart: r2(gqlByName.get(o.name)!.montant - o.montant) })),
+      },
+      toutes_commandes_rest: restOrders,
+    } as any;
+  }
 
   const config = await getShopConfig(admin);
   const { entries } = await getMetaobjectEntries(admin);
@@ -295,8 +401,10 @@ export default function DiagnosticCredits() {
         </button>
       </div>
       <p style={{ fontSize: "13px", color: "#666", margin: "0 0 16px" }}>
-        {data.nb_pros} pro(s) analysé(s) · CA recompté sur tout l&apos;historique de commandes · découpage avant/depuis le {data.date_mise_en_ligne_app}.
-        Paramètres : <code>?codes=CODE1,CODE2</code> pour cibler, <code>?appDate=YYYY-MM-DD</code> pour changer la date de référence.
+        {(data as any).mode === "comparaison"
+          ? <>Comparaison commande par commande REST vs GraphQL pour le code <strong>{(data as any).code}</strong> depuis le {(data as any).depuis}.</>
+          : <>{(data as any).nb_pros} pro(s) analysé(s) · CA recompté sur tout l&apos;historique de commandes · découpage avant/depuis le {(data as any).date_mise_en_ligne_app}.</>}
+        {" "}Paramètres : <code>?codes=CODE1,CODE2</code> pour cibler, <code>?appDate=YYYY-MM-DD</code> pour la date, <code>?compare=CODE</code> pour le détail commande par commande.
       </p>
       <pre
         style={{
