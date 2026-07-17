@@ -2089,6 +2089,7 @@ export default function Index() {
   const actionData = useActionData<typeof action>();
   const [searchParams, setSearchParams] = useSearchParams();
   const nav = useNavigation();
+  const revalidator = useRevalidator();
   const successType = searchParams.get("success");
 
   // PAGINATION
@@ -2099,6 +2100,7 @@ export default function Index() {
 
   const [showImport, setShowImport] = useState(false);
   const [showRecalculate, setShowRecalculate] = useState(false);
+  const [isRecalibrating, setIsRecalibrating] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [sortConfig, setSortConfig] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
@@ -2491,6 +2493,44 @@ export default function Index() {
                       <path fillRule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clipRule="evenodd" />
                     </svg>
                     Recalculer
+                  </button>
+                )}
+                {showCABlock && !isLocked && (
+                  <button
+                    type="button"
+                    className="btn btn--secondary table-card__new-btn"
+                    disabled={isRecalibrating}
+                    title="Recale l'accumulateur (prochain palier = seuil − CA%seuil) pour tous les pros illimités dont les crédits sont déjà à jour. Ne touche jamais un pro avec un dépôt en attente."
+                    onClick={async () => {
+                      if (!confirm("Recalibrer les paliers ?\n\nPour chaque pro illimité dont les crédits sont déjà à jour, l'accumulateur sera recalé sur son CA (prochain palier correct).\n\nAucun crédit ne sera déposé, et les pros avec un dépôt en attente ne seront PAS touchés.")) return;
+                      setIsRecalibrating(true);
+                      try {
+                        const res = await fetch("/app/api/recalibrate-remainders", { method: "POST" });
+                        const data = await res.json() as any;
+                        if (data.success) {
+                          showToast({
+                            title: "Paliers recalibrés",
+                            msg: `${data.updated} corrigé(s) · ${data.alreadyOk} déjà OK · ${data.skippedCreditsPending} ignoré(s) (dépôt en attente)${data.errors?.length ? ` · ${data.errors.length} erreur(s)` : ""}`,
+                            type: data.errors?.length ? "error" : "success",
+                          });
+                          indexCache = null;
+                          revalidator.revalidate();
+                        } else {
+                          showToast({ title: "Erreur", msg: String(data.error || "Recalibrage échoué"), type: "error" });
+                        }
+                      } catch (e) {
+                        showToast({ title: "Erreur réseau", msg: String(e), type: "error" });
+                      } finally {
+                        setIsRecalibrating(false);
+                      }
+                    }}
+                  >
+                    {isRecalibrating ? <Spinner color="#555" size="14px" /> : (
+                      <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
+                        <path d="M10 2a1 1 0 011 1v1.323l3.954 1.582 1.599-.8a1 1 0 01.894 1.79l-1.233.616 1.738 5.42a1 1 0 01-.285 1.05A3.989 3.989 0 0115 15a3.989 3.989 0 01-2.667-1.019 1 1 0 01-.285-1.05l1.715-5.349L11 6.477V16h2a1 1 0 110 2H7a1 1 0 110-2h2V6.477L6.237 7.582l1.715 5.349a1 1 0 01-.285 1.05A3.989 3.989 0 015 15a3.989 3.989 0 01-2.667-1.019 1 1 0 01-.285-1.05l1.738-5.42-1.233-.617a1 1 0 01.894-1.788l1.599.799L9 4.323V3a1 1 0 011-1z" />
+                      </svg>
+                    )}
+                    Recalibrer paliers
                   </button>
                 )}
                 <button
