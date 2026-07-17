@@ -470,7 +470,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           String(keys.adresse || keys.address || keys.ville || ""),
         );
         const remuRaw = String(keys["statut remuneration"] || keys["statut rémunération"] || keys.remuneration || keys.rémunération || keys.remuneration_type || "").toLowerCase().trim();
+        // ⚠️ tester "illimit" AVANT "limit" ("illimité" contient "limit")
         const remuneration_type = remuRaw.includes("sans") || remuRaw.includes("aucune") ? "sans_remuneration"
+          : remuRaw.includes("illimit") ? "illimite"
           : remuRaw.includes("limit") || remuRaw.includes("annuel") ? "limite_annee"
           : "illimite";
 
@@ -987,6 +989,7 @@ function ImportForm({ existingEntries, onClose }: { existingEntries: any[]; onCl
   const [fileCount, setFileCount] = useState<number | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
   const [parsedItems, setParsedItems] = useState<any[]>([]);
+  const [statutsMode, setStatutsMode] = useState(false);
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0); // Nombre traités
@@ -1213,7 +1216,113 @@ function ImportForm({ existingEntries, onClose }: { existingEntries: any[]; onCl
 
   const revalidator = useRevalidator();
 
+  // Mapping des libellés de statut (fichier) → valeurs internes.
+  // ⚠️ tester "illimit" AVANT "limit" ("illimité" contient "limit")
+  const mapStatutLabel = (raw: string): string | null => {
+    const s = raw.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+    if (!s) return null;
+    if (s.includes("sans") || s.includes("aucune")) return "sans_remuneration";
+    if (s.includes("illimit")) return "illimite";
+    if (s.includes("limit")) return "limite_annee";
+    return null;
+  };
+
+  // Import STATUTS uniquement : matche par code, ne touche que remuneration_type
+  const runStatutsImport = async () => {
+    if (!parsedItems.length) return;
+
+    const items: { code: string; statut: string }[] = [];
+    let sansStatut = 0;
+    for (const item of parsedItems) {
+      const keys = Object.keys(item).reduce((acc: any, key) => {
+        const cleanKey = key.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[*]/g, "").toLowerCase().trim();
+        acc[cleanKey] = item[key];
+        return acc;
+      }, {});
+      const code = String(keys.code || keys["code promo"] || "").trim();
+      if (!code) continue;
+      const statut = mapStatutLabel(String(keys["statut remuneration"] || keys.statut || keys.remuneration_type || ""));
+      if (!statut) { sansStatut++; continue; }
+      items.push({ code, statut });
+    }
+
+    // Simulation locale avant application
+    const byCode = new Map(existingEntries.map((e: any) => [(e.code || "").toUpperCase(), e]));
+    let changes = 0; let ok = 0; let notFound = 0;
+    for (const it of items) {
+      const e: any = byCode.get(it.code.toUpperCase());
+      if (!e) { notFound++; continue; }
+      if ((e.remuneration_type || "illimite") === it.statut) ok++; else changes++;
+    }
+
+    const confirmed = confirm(
+      `IMPORT DES STATUTS UNIQUEMENT — Simulation :\n\n` +
+      `• ${changes} statut(s) seront modifiés\n` +
+      `• ${ok} déjà corrects (inchangés)\n` +
+      `• ${notFound} code(s) introuvable(s) dans l'app\n` +
+      (sansStatut ? `• ${sansStatut} ligne(s) sans statut ignorée(s)\n` : "") +
+      `\nAucune autre donnée (codes, montants, discounts, crédits, CA) ne sera touchée.\n\nAppliquer ?`
+    );
+    if (!confirmed) return;
+
+    setIsProcessing(true);
+    setReport(null);
+    setTotalToProcess(changes);
+    setProgress(0);
+
+    try {
+      const fd = new FormData();
+      fd.append("items", JSON.stringify(items));
+      const res = await fetch("/app/api/import-statuts", { method: "POST", body: fd });
+      if (!res.ok || !res.body) {
+        setReport({ added: 0, updated: 0, errors: [`Erreur serveur: HTTP ${res.status}`] });
+        return;
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { done: streamDone, value } = await reader.read();
+        if (streamDone) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n\n");
+        buffer = lines.pop() || "";
+        for (const line of lines) {
+          const match = line.match(/^data: (.+)$/m);
+          if (!match) continue;
+          try {
+            const ev = JSON.parse(match[1]);
+            if (ev.total !== undefined) setTotalToProcess(ev.total);
+            if (ev.progress !== undefined) setProgress(ev.progress);
+            if (ev.done) {
+              setReport({
+                added: 0,
+                updated: ev.updated,
+                errors: [
+                  ...(ev.notFound?.length ? [`${ev.notFound.length} code(s) introuvable(s) : ${ev.notFound.slice(0, 10).join(", ")}${ev.notFound.length > 10 ? "…" : ""}`] : []),
+                  ...(ev.invalid || []),
+                  ...(ev.errors || []),
+                ],
+              });
+            }
+            if (ev.error) setReport({ added: 0, updated: 0, errors: [ev.error] });
+          } catch { /* ignore */ }
+        }
+      }
+      indexCache = null;
+      revalidator.revalidate();
+    } catch (e) {
+      setReport({ added: 0, updated: 0, errors: [String(e)] });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   const handleImportClick = async () => {
+    if (statutsMode) {
+      await runStatutsImport();
+      return;
+    }
     const addedCount = await runImport();
     // Revalider les données au lieu de recharger la page
     if (addedCount && addedCount > 0) {
@@ -1247,6 +1356,20 @@ function ImportForm({ existingEntries, onClose }: { existingEntries: any[]; onCl
             Traitement optimisé par batch de 5 items.
           </em>
         </p>
+
+        <label style={{ display: "flex", alignItems: "flex-start", gap: "8px", fontSize: "13px", padding: "10px 12px", background: statutsMode ? "#fffbeb" : "#f6f6f7", border: statutsMode ? "1px solid #f59e0b" : "1px solid #e1e3e5", borderRadius: "8px", cursor: "pointer", marginBottom: "12px" }}>
+          <input
+            type="checkbox"
+            checked={statutsMode}
+            onChange={(e) => setStatutsMode(e.target.checked)}
+            disabled={isProcessing}
+            style={{ marginTop: "2px" }}
+          />
+          <span>
+            <strong>⚖️ Statuts uniquement</strong> — met à jour le statut de rémunération (Illimité / Limité annuel / Aucune rémunération) en matchant par <strong>code promo</strong>.
+            Colonnes requises : <code>Code</code> + <code>Statut Rémunération</code>. Aucune autre donnée n&apos;est modifiée. Une simulation s&apos;affiche avant application.
+          </span>
+        </label>
 
         <div className="import-form__file-row">
           <label className={`import-form__file-label${isProcessing ? " import-form__file-label--disabled" : ""}`}>
