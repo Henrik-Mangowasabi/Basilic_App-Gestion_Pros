@@ -39,7 +39,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     // Moteur REST (celui du « Recalculer le CA » individuel)
     const restOrders: { name: string; date: string; montant: number; statut: string }[] = [];
     let pageUrl: string | null =
-      `https://${session.shop}/admin/api/2025-10/orders.json?discount_code=${encodeURIComponent(compareCode)}&status=any&limit=250&fields=id,name,created_at,discount_codes,subtotal_price,financial_status,cancel_reason,refunds&created_at_min=${encodeURIComponent(appDate + "T00:00:00")}`;
+      `https://${session.shop}/admin/api/2025-10/orders.json?discount_code=${encodeURIComponent(compareCode)}&status=any&limit=250&fields=id,name,created_at,discount_codes,subtotal_price,current_subtotal_price,financial_status,cancel_reason,refunds&created_at_min=${encodeURIComponent(appDate + "T00:00:00")}`;
     let restPages = 0;
     while (pageUrl && restPages < 20) {
       const resp: Response = await fetch(pageUrl, {
@@ -58,7 +58,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         restOrders.push({
           name: o.name,
           date: (o.created_at || "").slice(0, 10),
-          montant: r2(Math.max(0, parseFloat(o.subtotal_price || "0") - productRefunded)),
+          montant: r2(Math.max(0, parseFloat(o.current_subtotal_price ?? o.subtotal_price ?? "0") - productRefunded)),
           statut: o.financial_status,
         });
       }
@@ -81,7 +81,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
               node {
                 name
                 createdAt
-                subtotalPriceSet { shopMoney { amount } }
+                currentSubtotalPriceSet { shopMoney { amount } }
                 totalRefundedSet { shopMoney { amount } }
                 totalRefundedShippingSet { shopMoney { amount } }
                 discountCodes
@@ -101,7 +101,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         const n = e.node;
         const codes = (n.discountCodes || []).map((c: string) => c.toUpperCase());
         if (!codes.includes(compareCode)) continue;
-        const sub = parseFloat(n.subtotalPriceSet?.shopMoney?.amount || "0");
+        const sub = parseFloat(n.currentSubtotalPriceSet?.shopMoney?.amount || "0");
         const tr = parseFloat(n.totalRefundedSet?.shopMoney?.amount || "0");
         const sr = parseFloat(n.totalRefundedShippingSet?.shopMoney?.amount || "0");
         gqlOrders.push({

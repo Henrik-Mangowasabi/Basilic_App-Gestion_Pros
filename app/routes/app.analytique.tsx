@@ -107,7 +107,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           edges {
             node {
               createdAt
-              subtotalPriceSet { shopMoney { amount } }
+              currentSubtotalPriceSet { shopMoney { amount } }
               totalRefundedSet { shopMoney { amount } }
               totalRefundedShippingSet { shopMoney { amount } }
               discountCodes
@@ -167,7 +167,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           ordersEdges.forEach((edge: any) => {
             const order = edge.node;
             const createdAt = new Date(order.createdAt);
-            const subtotal = parseFloat(order.subtotalPriceSet?.shopMoney?.amount || "0");
+            // currentSubtotalPriceSet = sous-total après éditions de commande (articles supprimés exclus)
+            const subtotal = parseFloat(order.currentSubtotalPriceSet?.shopMoney?.amount || "0");
             const totalRefunded = parseFloat(order.totalRefundedSet?.shopMoney?.amount || "0");
             const shippingRefunded = parseFloat(order.totalRefundedShippingSet?.shopMoney?.amount || "0");
             const productRefunded = Math.max(0, totalRefunded - shippingRefunded);
@@ -256,7 +257,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             edges {
               node {
                 createdAt
-                subtotalPriceSet { shopMoney { amount } }
+                currentSubtotalPriceSet { shopMoney { amount } }
                 totalRefundedSet { shopMoney { amount } }
                 totalRefundedShippingSet { shopMoney { amount } }
                 discountCodes
@@ -311,7 +312,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             const edgeCodes: string[] = edge.node.discountCodes || [];
             const relevantCodes = edgeCodes.filter((c: string) => batchSet.has(c.toUpperCase()));
             if (relevantCodes.length > 0) {
-              const subtotal = parseFloat(edge.node.subtotalPriceSet?.shopMoney?.amount || "0");
+              const subtotal = parseFloat(edge.node.currentSubtotalPriceSet?.shopMoney?.amount || "0");
               const totalRefunded = parseFloat(edge.node.totalRefundedSet?.shopMoney?.amount || "0");
               const shippingRefunded = parseFloat(edge.node.totalRefundedShippingSet?.shopMoney?.amount || "0");
               const productRefunded = Math.max(0, totalRefunded - shippingRefunded);

@@ -12,7 +12,7 @@ const ORDERS_BATCH_QUERY = `#graphql
     orders(first: 250, query: $qs, after: $cursor) {
       edges {
         node {
-          subtotalPriceSet { shopMoney { amount } }
+          currentSubtotalPriceSet { shopMoney { amount } }
           totalRefundedSet { shopMoney { amount } }
           totalRefundedShippingSet { shopMoney { amount } }
           discountCodes
@@ -86,7 +86,10 @@ export async function queryOrderStatsByCodeBatches(
 
         for (const edge of edges) {
           const order = edge.node;
-          const subtotal = parseFloat(order.subtotalPriceSet?.shopMoney?.amount || "0");
+          // currentSubtotalPriceSet = sous-total APRÈS éditions de commande (les articles
+          // supprimés lors d'une modification ne sont pas comptés — subtotalPriceSet, lui,
+          // les compterait et gonflerait le CA)
+          const subtotal = parseFloat(order.currentSubtotalPriceSet?.shopMoney?.amount || "0");
           const totalRefunded = parseFloat(order.totalRefundedSet?.shopMoney?.amount || "0");
           const shippingRefunded = parseFloat(order.totalRefundedShippingSet?.shopMoney?.amount || "0");
           // Soustraire uniquement les remboursements produits (pas shipping)
@@ -146,7 +149,7 @@ const FULL_SCAN_QUERY = `#graphql
         node {
           name
           createdAt
-          subtotalPriceSet { shopMoney { amount } }
+          currentSubtotalPriceSet { shopMoney { amount } }
           totalRefundedSet { shopMoney { amount } }
           totalRefundedShippingSet { shopMoney { amount } }
           discountCodes
@@ -214,7 +217,7 @@ export async function queryAllOrdersForCode(
         }
 
         if (allOrderCodes.has(targetUpper)) {
-          const subtotal = parseFloat(order.subtotalPriceSet?.shopMoney?.amount || "0");
+          const subtotal = parseFloat(order.currentSubtotalPriceSet?.shopMoney?.amount || "0");
           const totalRefunded = parseFloat(order.totalRefundedSet?.shopMoney?.amount || "0");
           const shippingRefunded = parseFloat(order.totalRefundedShippingSet?.shopMoney?.amount || "0");
           const productRefunded = Math.max(0, totalRefunded - shippingRefunded);

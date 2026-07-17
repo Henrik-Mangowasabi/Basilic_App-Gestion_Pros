@@ -38,7 +38,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       let restSuccess = false;
 
       try {
-        let restUrl = `https://${session.shop}/admin/api/2025-10/orders.json?discount_code=${encodeURIComponent(codeUpper)}&status=any&limit=250&fields=id,name,created_at,discount_codes,subtotal_price,financial_status,cancel_reason,refunds`;
+        let restUrl = `https://${session.shop}/admin/api/2025-10/orders.json?discount_code=${encodeURIComponent(codeUpper)}&status=any&limit=250&fields=id,name,created_at,discount_codes,subtotal_price,current_subtotal_price,financial_status,cancel_reason,refunds`;
         if (fromDate) restUrl += `&created_at_min=${encodeURIComponent(fromDate + "T00:00:00")}`;
 
         // Pagination via Link header (rel="next") — un pro peut avoir >250 commandes
@@ -64,7 +64,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
           for (const o of restOrders) {
             if (o.financial_status === "refunded" || o.financial_status === "voided" || o.cancel_reason) continue;
-            const subtotal = parseFloat(o.subtotal_price || "0");
+            // current_subtotal_price = sous-total après éditions de commande (articles supprimés exclus)
+            const subtotal = parseFloat(o.current_subtotal_price ?? o.subtotal_price ?? "0");
             let productRefunded = 0;
             for (const refund of o.refunds || []) {
               for (const ri of refund.refund_line_items || []) {
