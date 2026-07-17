@@ -157,7 +157,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       if (creditsVerses > 0 && !e.customer_id) {
         verdicts.push(`👻 ${round2(creditsVerses)}€ enregistrés mais AUCUN client lié — jamais versés`);
       }
-      if (Math.abs(cacheRevenue - depuis.revenue) > 1) {
+      // Tolérance 5€ : les remboursements partiels sont déduits différemment entre le
+      // recalcul individuel (REST, lignes remboursées) et ce diagnostic (GraphQL, montant
+      // réellement remboursé) → micro-écarts d'arrondi normaux, sans impact sur les paliers
+      if (Math.abs(cacheRevenue - depuis.revenue) > 5) {
         verdicts.push(`⚠ CA en cache (${round2(cacheRevenue)}€) ≠ CA depuis la mise en ligne (${round2(depuis.revenue)}€) → lancer « Recalculer le CA » (Réglage Date actif)`);
       }
       if (avant.revenue > 1) {
