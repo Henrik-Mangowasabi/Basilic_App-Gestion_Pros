@@ -119,8 +119,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const results = prosFiltered
     .map((e: any) => {
       const codeUpper = e.code.toUpperCase();
-      const total = statsTotal.get(codeUpper) ?? { revenue: 0, count: 0 };
-      const depuis = statsDepuisApp.get(codeUpper) ?? { revenue: 0, count: 0 };
+      const total = statsTotal.get(codeUpper) ?? { revenue: 0, count: 0, refunded: 0, refundedCount: 0 };
+      const depuis = statsDepuisApp.get(codeUpper) ?? { revenue: 0, count: 0, refunded: 0, refundedCount: 0 };
       const avant = {
         revenue: Math.max(0, total.revenue - depuis.revenue),
         count: Math.max(0, total.count - depuis.count),
@@ -166,6 +166,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       if (avant.revenue > 1) {
         verdicts.push(`ℹ ${round2(avant.revenue)}€ de CA (${avant.count} cmd) datent d'AVANT le ${appDate} — hors base de calcul des crédits (choix : seul le CA depuis le lancement compte)`);
       }
+      if (depuis.refunded > 0.01) {
+        verdicts.push(`ℹ ${round2(depuis.refunded)}€ remboursés sur ${depuis.refundedCount} commande(s) depuis le ${appDate} — DÉJÀ déduits du CA affiché`);
+      }
       if (isBlocked) {
         verdicts.push(`🔒 Réglementée BLOQUÉE jusqu'au ${unlockDate} — aucun crédit d'ici là, l'accumulateur (${round2(accumulateur)}€) continue de monter`);
       } else if (remType === "limite_annee") {
@@ -204,6 +207,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           commandes_avant_app: avant.count,
           ca_depuis_app: round2(depuis.revenue),
           commandes_depuis_app: depuis.count,
+          rembourse_depuis_app: round2(depuis.refunded),
+          commandes_remboursees_depuis_app: depuis.refundedCount,
+          rembourse_total: round2(total.refunded),
+          commandes_remboursees_total: total.refundedCount,
         },
         store_credit_reel: sc
           ? {

@@ -42,13 +42,22 @@ const ORDERS_BATCH_QUERY = `#graphql
 // Exclure commandes annulées, remboursées intégralement, paiements annulés
 const DEFAULT_STATUS_FILTER = "-financial_status:refunded -financial_status:voided -status:cancelled";
 
+export type CodeOrderStats = {
+  revenue: number;
+  count: number;
+  /** Montant produit remboursé (déjà déduit de revenue) */
+  refunded: number;
+  /** Nombre de commandes avec au moins un remboursement partiel */
+  refundedCount: number;
+};
+
 export async function queryOrderStatsByCodeBatches(
   admin: AdminApiContext,
   codes: string[],
   extraFilter?: string,
   maxPagesPerBatch = MAX_PAGES_PER_BATCH,
-): Promise<Map<string, { revenue: number; count: number }>> {
-  const statsMap = new Map<string, { revenue: number; count: number }>();
+): Promise<Map<string, CodeOrderStats>> {
+  const statsMap = new Map<string, CodeOrderStats>();
   if (codes.length === 0) return statsMap;
 
   const baseFilter = extraFilter
@@ -96,8 +105,13 @@ export async function queryOrderStatsByCodeBatches(
 
           for (const upper of allOrderCodes) {
             if (batchSet.has(upper)) {
-              const cur = statsMap.get(upper) || { revenue: 0, count: 0 };
-              statsMap.set(upper, { revenue: cur.revenue + revenue, count: cur.count + 1 });
+              const cur = statsMap.get(upper) || { revenue: 0, count: 0, refunded: 0, refundedCount: 0 };
+              statsMap.set(upper, {
+                revenue: cur.revenue + revenue,
+                count: cur.count + 1,
+                refunded: cur.refunded + productRefunded,
+                refundedCount: cur.refundedCount + (productRefunded > 0 ? 1 : 0),
+              });
             }
           }
         }
