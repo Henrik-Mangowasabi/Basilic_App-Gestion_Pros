@@ -1352,14 +1352,13 @@ function RecalculateCreditsSingleModal({ entry, onClose, onDone }: { entry: any;
   const name = [entry.first_name, entry.last_name].filter(Boolean).join(" ");
 
   const handleApply = async () => {
+    if (loading) return; // anti double-clic côté client (le serveur est de toute façon idempotent)
     setLoading(true);
     try {
+      // Le serveur recalcule lui-même l'écart dû depuis l'état frais du metaobject —
+      // les montants affichés ici ne sont qu'une prévisualisation
       const fd = new FormData();
       fd.append("metaobjectId", entry.id);
-      if (entry.customer_id) fd.append("customerId", entry.customer_id);
-      fd.append("creditsToDeposit", String(creditsToDeposit));
-      fd.append("newCreditEarned", String(expectedCreditEarned));
-      fd.append("newCaRemainder", String(expectedRemainder));
       const res = await fetch("/app/api/recalculate-credits", { method: "POST", body: fd });
       const data = await res.json() as any;
       if (data.success) {
