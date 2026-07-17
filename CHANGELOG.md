@@ -1,3 +1,32 @@
+# Basilic App — Gestion Pros Santé
+
+## 2026.07.17 — Loi anti-cadeaux, fiabilisation crédits & diagnostic
+
+### Loi anti-cadeaux
+- Nouveau réglage `regulated_credit_amount` (défaut 60€) : les pros « Limité (annuel) » touchent un bon annuel unique de 60€ au 1er franchissement du seuil, puis blocage 12 mois. Les illimités restent à 75€/palier de 500€.
+- Garde-fou : la modale « Recalculer les crédits » est réservée aux pros illimités.
+- Réglage Date (base de calcul du CA) persisté en shop metafield (`recalc_from_date` = 2026-03-03) et respecté par tous les chemins, webhooks compris.
+
+### Fiabilisation (bugs corrigés)
+- Le crédit n'est compté que si le virement Store Credit réussit (fin des « crédits fantômes »).
+- Recalcul individuel : pagination REST + check HTTP (fini le CA écrasé à 0€ sur rate-limit).
+- Webhook `orders/create` : répond en <1s (traitement en tâche de fond, fin des re-livraisons Shopify), traite TOUS les codes d'une commande.
+- Webhook `discounts/delete` : ne supprime plus un pro pendant un delete+recreate interne (resync du discount_id).
+- Remboursements calculés à l'identique (REST = GraphQL), analytique exacte au-delà de 6 mois, vérification du mot de passe côté serveur, champ legacy `name` garanti dans la définition metaobject.
+
+### Nouveaux outils
+- Page `/app/diagnostic-credits` : CA réel vs cache (avant/depuis le lancement), détection crédits fantômes (vs transactions Store Credit réelles), codes en double, liste `depots_a_faire`.
+- Bouton « Recalibrer paliers » (vue CA, mode édition) : recale l'accumulateur en masse, uniquement pour les pros aux crédits déjà à jour.
+- 13 tests unitaires sur la logique de paliers (`app/lib/credits.ts`, `npm test`).
+
+### Refactor
+- `updateMetaobjectFields()` : point d'entrée unique de la mutation metaobjectUpdate.
+- `depositStoreCredit()` : implémentation unique du dépôt store credit (devise du shop, userErrors vérifiées).
+- `computeCreditsForOrder()` : logique de paliers extraite en fonction pure.
+- Helpers partagés : `security.server.ts` (comparaison à temps constant), `getShopId`/`setShopMetafields`.
+
+---
+
 # @shopify/shopify-app-template-react-router
 
 ## 2025.12.11

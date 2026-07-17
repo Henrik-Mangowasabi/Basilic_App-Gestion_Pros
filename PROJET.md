@@ -39,10 +39,11 @@
 | TypeScript | 5.9.3 | Typage |
 | Vite | 6.3.6 | Build |
 | @shopify/shopify-app-react-router | 1.1.0 | Auth + session Shopify |
-| @shopify/polaris | 13.9.5 | UI actuelle (à remplacer par Basilic UI Kit) |
-| Prisma | 6.16.3 | ORM |
-| PostgreSQL (Supabase) | — | Base de données |
+| @shopify/polaris | 13.9.5 | UI (remplacée progressivement par Basilic UI Kit) |
+| SQLite (sessions.db) | — | Sessions OAuth uniquement (disque persistant Render) |
+| Metaobjects Shopify | — | « Base de données » métier (pas de DB externe) |
 | XLSX | 0.18.5 | Parsing Excel/CSV |
+| Vitest | 4.x | Tests unitaires (`npm test` — logique de paliers) |
 
 ---
 
@@ -52,28 +53,40 @@
 mm-gestion-pros-sante/
 ├── app/
 │   ├── routes/
-│   │   ├── app.tsx                    # Layout root + navigation
-│   │   ├── app._index.tsx             # Page principale — Gestion des pros (~2250 lignes)
-│   │   ├── app.codes_promo.tsx        # Page codes promo
-│   │   ├── app.clients.tsx            # Page clients / store credit
-│   │   ├── app.analytique.tsx         # Page analytique
-│   │   ├── app.tutoriel.tsx           # Guide d'utilisation
-│   │   ├── app.api.import.tsx         # Endpoint API import externe
-│   │   ├── webhooks.orders.create.tsx # Webhook commandes (~500 lignes)
+│   │   ├── app.tsx                            # Layout root + navigation + config globale
+│   │   ├── app._index.tsx                     # Page principale — vues Pros / Code Promo / CA / Limitation
+│   │   ├── app.analytique.tsx                 # Dashboard analytique (requêtes live par lots)
+│   │   ├── app.validation.tsx                 # Validation des pros en attente (Klaviyo)
+│   │   ├── app.tutoriel.tsx                   # Guide d'utilisation + Danger Zone
+│   │   ├── app.diagnostic-credits.tsx         # 🔎 Page diagnostic (audit CA/crédits/doublons)
+│   │   ├── app.api.import.tsx                 # API : upsert d'un pro (import batch client)
+│   │   ├── app.api.recalculate-all.tsx        # API : recalcul global du CA (SSE)
+│   │   ├── app.api.recalculate-cache.tsx      # API : recalcul CA d'un pro (REST paginé + fallback)
+│   │   ├── app.api.recalculate-credits.tsx    # API : dépôt des crédits manquants d'un pro
+│   │   ├── app.api.recalibrate-remainders.tsx # API : recalibrage des accumulateurs en masse
+│   │   ├── app.api.rename-discounts.tsx       # API : renommage en masse des discounts (SSE)
+│   │   ├── app.api.verify-password.tsx        # API : vérification serveur du mot de passe édition
+│   │   ├── webhooks.orders.create.tsx         # Webhook commandes (crédits temps réel)
+│   │   ├── webhooks.orders.cancelled.tsx      # Webhook annulations (recalc CA)
+│   │   ├── webhooks.refunds.create.tsx        # Webhook remboursements (recalc CA)
+│   │   ├── webhooks.discounts.delete.tsx      # Webhook suppression discount (avec garde-fou)
+│   │   ├── webhooks.customers.delete.tsx      # Webhook suppression client
+│   │   ├── webhooks.klaviyo.tsx               # Webhook entrant Klaviyo (pros en attente)
 │   │   └── webhooks.app.uninstalled.tsx
 │   ├── lib/
-│   │   ├── metaobject.server.ts       # CRUD métaobjets Shopify (~507 lignes)
-│   │   ├── discount.server.ts         # Gestion codes promo Shopify (~165 lignes)
-│   │   ├── customer.server.ts         # Gestion clients Shopify (~300 lignes)
+│   │   ├── metaobject.server.ts       # CRUD metaobjects + updateMetaobjectFields (unique)
+│   │   ├── discount.server.ts         # CRUD codes promo + garde-fou codesBeingRecreated
+│   │   ├── customer.server.ts         # Clients + depositStoreCredit (unique)
+│   │   ├── orders.server.ts           # Requêtes commandes par lots + recalculateProCache
+│   │   ├── credits.ts                 # ⚖️ Logique PURE des paliers (testée)
+│   │   ├── credits.test.ts            # 13 tests vitest
+│   │   ├── security.server.ts         # Comparaison à temps constant
 │   │   └── logger.server.ts           # Logger
-│   ├── components/
-│   │   ├── Pagination.tsx             # Composant pagination
-│   │   └── ErrorDisplay.tsx           # Affichage erreurs
-│   ├── db.server.ts                   # Singleton Prisma
-│   ├── shopify.server.ts              # Init Shopify API
+│   ├── components/                    # NavBar, Pagination, ErrorDisplay + ui/ (Basilic UI Kit)
+│   ├── context/EditModeContext.tsx    # Mode édition + config + Réglage Date
+│   ├── config.server.ts               # Config shop metafields (seuils, montants, date)
+│   ├── shopify.server.ts              # Init Shopify API (sessions SQLite)
 │   └── root.tsx                       # Layout HTML racine
-├── prisma/
-│   └── schema.prisma                  # Schéma BDD (Session + Config)
 └── PROJET.md                          # Ce fichier
 ```
 
@@ -108,10 +121,11 @@ Colonnes actuelles :
 - Bouton d'import en haut de page
 - Rapport post-import (ajoutés, ignorés, doublons, erreurs)
 
-#### Réglages Crédits Store
-- Seuil de CA (ex. 500 €) pour déclencher 1 crédit
-- Montant du crédit offert (ex. 10 €)
-- Stocké en base (modèle `Config`)
+#### Réglages Crédits Store (sidebar)
+- Seuil de CA par palier (500 €)
+- Montant du crédit illimité (75 €)
+- Montant réglementé annuel — loi anti-cadeaux (60 €)
+- Stockés en shop metafields (`basilic_config.*`) — voir section 9
 
 ---
 
@@ -167,7 +181,9 @@ Type custom créé automatiquement à l'installation. Stocke toutes les données
 | Champ | Clé | Type Shopify | Obligatoire |
 |---|---|---|---|
 | Référence | `identification` | single_line_text | ✓ |
-| Nom | `name` | single_line_text | ✓ |
+| Nom complet (legacy) | `name` | single_line_text | — |
+| Prénom | `first_name` | single_line_text | ✓ |
+| Nom | `last_name` | single_line_text | ✓ |
 | Email | `email` | single_line_text | ✓ |
 | Code promo | `code` | single_line_text | ✓ |
 | Montant | `montant` | number_decimal | ✓ |
@@ -180,8 +196,15 @@ Type custom créé automatiquement à l'installation. Stocke toutes les données
 | CA (cache) | `cache_revenue` | number_decimal | — |
 | Nb commandes (cache) | `cache_orders_count` | number_integer | — |
 | Crédits gagnés (cache) | `cache_credit_earned` | number_decimal | — |
+| Accumulateur palier | `cache_ca_remainder` | number_decimal | — |
+| Statut rémunération | `remuneration_type` | single_line_text (`illimite` / `limite_annee` / `sans_remuneration`) | — |
+| Bloqué le | `limitation_date` | single_line_text (YYYY-MM-DD) | — |
+| Débloqué le | `limitation_unlock_date` | single_line_text (YYYY-MM-DD) | — |
 
-> **Modification prévue (V0)** : Séparer `name` en `first_name` + `last_name` dans le métaobjet.
+> ⚠️ Le champ legacy `name` est toujours écrit à la création — il DOIT exister dans la
+> définition (présent dans `createMetaobject` + migration), sinon toute création échoue.
+> ⚠️ Un code promo = UNE seule fiche : les doublons de code faussent les compteurs
+> (détectés par la page Diagnostic).
 
 ---
 
@@ -240,27 +263,43 @@ write_store_credit_account_transactions
 
 ## 6. Système de crédits boutique
 
-### Règle de calcul
+> ⚖️ **Loi anti-cadeaux (juillet 2026)** : le système distingue désormais les professions
+> réglementées (médecins, sages-femmes, kinés, pharmaciens, ostéos…) des non-réglementées
+> (naturopathes, doulas, accompagnantes périnatales…). Le statut se règle **par pro**
+> (champ `remuneration_type`) via la modale d'édition ou la vue Gestion Limitation.
 
-```
-crédits_gagnés = floor(CA_total / seuil) × montant_crédit
-```
+### Trois statuts de rémunération
 
-Exemple avec seuil=500€ et crédit=10€ :
-- CA 400€ → 0€ crédit
-- CA 500€ → 10€ crédit
-- CA 1 000€ → 20€ crédit
+| Statut (`remuneration_type`) | Règle | Public |
+|---|---|---|
+| `illimite` (défaut) | **75€** versés à chaque tranche de **500€** de CA (N paliers possibles) | Non-réglementées |
+| `limite_annee` | **60€** max (montant réglementé), 1 seule fois par an, au 1er franchissement de 500€ → blocage 12 mois (`limitation_unlock_date`) | Réglementées |
+| `sans_remuneration` | Aucun crédit, jamais — le CA reste compté pour les stats | Réglementées (choix strict) |
 
-### Déclenchement
+Les trois montants (seuil / montant illimité / montant réglementé annuel) se règlent dans
+la sidebar → **Réglages Crédits** (shop metafields `basilic_config.credit_threshold`,
+`credit_amount`, `regulated_credit_amount`).
 
-À chaque commande (webhook `orders/create`) :
-1. Extraction du code promo utilisé
-2. Recherche du pro associé (via le métaobjet)
-3. Calcul du nouveau CA (avant remise)
-4. Mise à jour des caches dans le métaobjet
-5. Calcul du delta crédit à créditer
-6. Crédit du compte Store Credit Shopify du client (si delta > 0)
-7. Mise à jour du metafield `ca_genere` sur la fiche client (**à ajouter V0**)
+### Base de calcul du CA
+
+- **CA = `subtotalPriceSet` (post-réduction, hors livraison, hors taxes)**, remboursements produits déduits — même formule dans le webhook, l'analytique et tous les recalculs.
+- **Réglage Date** (sidebar, vue CA) : date plancher persistée en shop metafield (`basilic_config.recalc_from_date`) et respectée par TOUS les chemins (webhook remboursement/annulation compris). **Décision business : base = CA depuis le 03/03/2026** (go-live du programme) — le CA antérieur ne donne aucun droit.
+
+### Mécanique des paliers (accumulateur)
+
+- `cache_ca_remainder` accumule le CA commande par commande (0 → seuil). Quand il atteint 500€ → dépôt du crédit → soustraction du seuil.
+- **Le crédit n'est compté (`cache_credit_earned`) QUE si le virement Store Credit Shopify réussit.** En cas d'échec, l'accumulateur reste intact et le prochain webhook réessaie — plus jamais de « crédits fantômes ».
+- La logique de paliers est une fonction pure testée : `app/lib/credits.ts` (`computeCreditsForOrder`, 13 tests vitest — `npm test`).
+- Le dépôt Store Credit passe exclusivement par `depositStoreCredit()` (`customer.server.ts`) : devise du shop, vérification des `userErrors`.
+
+### Recalculs (règles strictes)
+
+| Outil | Ce qu'il touche | Ce qu'il ne touche JAMAIS |
+|---|---|---|
+| « Recalculer » (global, vue CA) | `cache_revenue` + `cache_orders_count` (depuis la Réglage Date) | crédits & accumulateur |
+| « Recalculer le CA » (⋯ par pro, REST paginé) | idem, pour 1 pro — **seul outil fiable si l'index Shopify du code est cassé** (discount recréé) | crédits & accumulateur |
+| « Recalculer les crédits » (⋯ par pro) | dépose l'écart (attendus − versés) + recale l'accumulateur. **Réservé aux illimitées** (verrouillé sinon) | le CA |
+| « Recalibrer paliers » (global, mode édition) | `cache_ca_remainder` = CA % seuil, en masse — uniquement pour les pros dont les crédits sont déjà exactement à jour | crédits, CA, pros non soldés/réglementées |
 
 ---
 
@@ -293,42 +332,95 @@ Excel `.xlsx` ou CSV avec colonnes flexibles (accents tolérés) :
 
 ## 8. Webhooks
 
-### `orders/create`
+### `orders/create` (HMAC manuel)
 
 Déclenché à chaque nouvelle commande.
 
-Étapes :
-1. Extraction du code promo (3 méthodes en fallback)
-2. Calcul CA (montant avant remise, 4 méthodes en fallback)
-3. Recherche du pro par code (indexée puis exhaustive)
-4. Mise à jour cache métaobjet
-5. Crédit Store Credit client (si delta > 0)
-6. Toujours retourner HTTP 200 (évite les re-tentatives Shopify)
+1. Validation HMAC (comparaison à temps constant) + parsing
+2. **Réponse HTTP 200 immédiate**, puis traitement en tâche de fond (`processOrderWebhook`) — Shopify exige < 5 s, sinon re-livraison = double comptage
+3. Collecte de **TOUS les codes promo** de la commande (`discount_codes` + fallback `discount_applications` via GraphQL) — chaque pro correspondant est crédité
+4. Par code (`processEarnForCode`) : recherche du pro (indexée puis exhaustive ≤ 5 000), calcul des paliers selon le statut (`computeCreditsForOrder`), dépôt Store Credit **puis seulement** avancement des compteurs, mise à jour du metaobject (`updateMetaobjectFields`) et du metafield `ca_genere`
+
+### `orders/cancelled` et `refunds/create` (HMAC manuel)
+
+Recalculent le cache CA du/des pros concernés via `recalculateProCache()` —
+en respectant la Réglage Date (le CA filtré n'est jamais écrasé par l'historique complet).
+Ne touchent jamais crédits/accumulateur.
+
+### `discounts/delete`
+
+Si un discount lié à un pro est supprimé dans Shopify :
+- **Garde-fou anti-suppression accidentelle** : si la suppression vient du flow interne
+  delete+recreate (`codesBeingRecreated`), ou si un discount avec le même code existe
+  à nouveau → resynchronise le `discount_id` au lieu de supprimer le pro
+- Sinon : supprime la fiche pro + nettoie tag/metafield client
+
+### `customers/delete`
+
+Supprime la fiche pro (metaobject + discount) liée au client supprimé.
+
+### Webhook entrant Klaviyo (`/webhooks/klaviyo`, secret partagé en query)
+
+Crée/tague le client Shopify (`pro_pending` + metafield `pro_en_attente_de_validation`)
+quand un pro postule via un flow Klaviyo → alimente la page Validation.
 
 ### `app/uninstalled`
 
-Nettoyage de la session en base lors de la désinstallation.
+Nettoyage de la session lors de la désinstallation.
 
 ---
 
 ## 9. Base de données
 
-### Modèle `Session` (Prisma)
+**Il n'y a PAS de base de données externe** (décision d'architecture — pas de MO orders log,
+pas de Prisma/PostgreSQL) :
 
-Gère les sessions OAuth Shopify. **Conservé tel quel** (requis par le framework).
+- **Sessions OAuth** : SQLite local (`sessions.db`, disque persistant Render) via `@shopify/shopify-app-session-storage-sqlite`
+- **Données pros** : metaobjects Shopify `mm_pro_de_sante` (source de vérité)
+- **Configuration** : shop metafields, namespace `basilic_config` :
 
-### Modèle `Config`
+| Clé | Type | Rôle | Défaut |
+|---|---|---|---|
+| `credit_threshold` | number_decimal | Seuil de CA par palier | 500€ |
+| `credit_amount` | number_decimal | Crédit par palier (illimité) | 75€ |
+| `regulated_credit_amount` | number_decimal | Bon annuel unique (limité annuel / loi anti-cadeaux) | 60€ |
+| `recalc_from_date` | single_line_text | Date plancher des calculs de CA (Réglage Date) | 2026-03-03 |
+| `validation_value` / `validation_type` / `validation_code_prefix` | — | Défauts pour la page Validation | 5 / % / PRO_ |
 
-```prisma
-model Config {
-  id           Int    @id @default(autoincrement())
-  shop         String @unique
-  threshold    Float  @default(500.0)   // Seuil CA (€)
-  creditAmount Float  @default(10.0)    // Crédit offert (€)
-}
-```
+---
 
-> **Simplification V0** : La logique multi-store sera supprimée. La DB ne sert qu'à stocker la session et la config du store unique. Le champ `shop` reste pour la compatibilité avec le framework Shopify.
+## 9bis. Outils d'administration & diagnostic
+
+### Page Diagnostic (`/app/diagnostic-credits`)
+
+Audit complet de la base, à lancer **~1×/mois** ou en cas de doute (accès : URL directe
+dans l'admin, éventuellement `?codes=CODE1,CODE2` pour cibler, `?appDate=YYYY-MM-DD`
+pour changer la date de référence).
+
+Pour chaque pro, la page recompte le CA réel sur **tout l'historique** de commandes
+(l'app a le scope `read_all_orders`), le découpe avant/depuis la date de lancement,
+et compare aux compteurs en cache. Elle détecte :
+
+- **⚠ CA désynchronisé** (cache ≠ CA depuis le lancement) → « Recalculer le CA »
+- **👻 Crédits fantômes** : compteur `cache_credit_earned` sans transactions Store Credit
+  réelles (héritage d'un ancien bug) → corriger le champ dans le metaobject
+- **🚨 Codes en double** : 2 fiches sur le même code → supprimer le doublon via
+  Contenu → Metaobjects (PAS via l'app, qui supprimerait le code promo partagé)
+- **Dépôts en attente** : bloc `depots_a_faire` en tête de JSON = liste compacte
+  (code, nom, montant) triée du plus gros au plus petit + total
+
+### Cas particulier : index Shopify cassé (scénario « Maud »)
+
+Quand un discount a été supprimé/recréé, la recherche `discount_code:X` de Shopify ne
+retrouve plus les anciennes commandes → **le recalcul global affiche 0€** pour ce pro.
+Seul le **recalcul individuel** (⋯ → Recalculer le CA, qui passe par la REST API) retrouve
+les commandes. Après un recalcul global, toujours vérifier les pros retombés à 0.
+
+### Vérification manuelle d'un crédit
+
+Fiche client Shopify → Crédit en magasin → transactions : chaque versement de l'app
+apparaît avec la source « Basilic App - Pros - JM ». Un compteur « gagné » sans
+transaction correspondante = fantôme.
 
 ---
 
